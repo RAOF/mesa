@@ -72,7 +72,7 @@ delete_vp_variant(struct st_context *st, struct st_vp_variant *vpv)
    if (vpv->tgsi.tokens)
       st_free_tokens(vpv->tgsi.tokens);
       
-   free( vpv );
+   FREE( vpv );
 }
 
 
@@ -110,7 +110,7 @@ delete_fp_variant(struct st_context *st, struct st_fp_variant *fpv)
       _mesa_free_parameter_list(fpv->parameters);
    if (fpv->tgsi.tokens)
       st_free_tokens(fpv->tgsi.tokens);
-   free(fpv);
+   FREE(fpv);
 }
 
 
@@ -142,7 +142,7 @@ delete_gp_variant(struct st_context *st, struct st_gp_variant *gpv)
    if (gpv->driver_shader) 
       cso_delete_geometry_shader(st->cso_context, gpv->driver_shader);
       
-   free(gpv);
+   FREE(gpv);
 }
 
 
@@ -313,7 +313,7 @@ st_translate_vertex_program(struct st_context *st,
 
    ureg = ureg_create( TGSI_PROCESSOR_VERTEX );
    if (ureg == NULL) {
-      free(vpv);
+      FREE(vpv);
       return NULL;
    }
 
@@ -671,7 +671,7 @@ st_translate_fragment_program(struct st_context *st,
 
    ureg = ureg_create( TGSI_PROCESSOR_FRAGMENT );
    if (ureg == NULL) {
-      free(variant);
+      FREE(variant);
       return NULL;
    }
 
@@ -830,7 +830,7 @@ st_translate_geometry_program(struct st_context *st,
 
    ureg = ureg_create( TGSI_PROCESSOR_GEOMETRY );
    if (ureg == NULL) {
-      free(gpv);
+      FREE(gpv);
       return NULL;
    }
 

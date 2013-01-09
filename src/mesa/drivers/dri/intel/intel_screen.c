@@ -252,7 +252,7 @@ intel_allocate_image(int dri_format, void *loaderPrivate)
 {
     __DRIimage *image;
 
-    image = calloc(1, sizeof *image);
+    image = CALLOC(sizeof *image);
     if (image == NULL)
 	return NULL;
 
@@ -313,7 +313,7 @@ intel_create_image_from_name(__DRIscreen *screen,
 						  cpp, width, height,
 						  pitch, name, "image");
     if (image->region == NULL) {
-       free(image);
+       FREE(image);
        return NULL;
     }
 
@@ -337,7 +337,7 @@ intel_create_image_from_renderbuffer(__DRIcontext *context,
    }
 
    irb = intel_renderbuffer(rb);
-   image = calloc(1, sizeof *image);
+   image = CALLOC(sizeof *image);
    if (image == NULL)
       return NULL;
 
@@ -375,7 +375,7 @@ static void
 intel_destroy_image(__DRIimage *image)
 {
     intel_region_release(&image->region);
-    free(image);
+    FREE(image);
 }
 
 static __DRIimage *
@@ -401,7 +401,7 @@ intel_create_image(__DRIscreen *screen,
    image->region =
       intel_region_alloc(intelScreen, tiling, cpp, width, height, true);
    if (image->region == NULL) {
-      free(image);
+      FREE(image);
       return NULL;
    }
    
@@ -444,13 +444,13 @@ intel_dup_image(__DRIimage *orig_image, void *loaderPrivate)
 {
    __DRIimage *image;
 
-   image = calloc(1, sizeof *image);
+   image = CALLOC(sizeof *image);
    if (image == NULL)
       return NULL;
 
    intel_region_reference(&image->region, orig_image->region);
    if (image->region == NULL) {
-      free(image);
+      FREE(image);
       return NULL;
    }
 
@@ -547,13 +547,13 @@ intel_from_planar(__DRIimage *parent, int plane, void *loaderPrivate)
     pitch = stride / cpp;
     if (offset + height * cpp * pitch > parent->region->bo->size) {
        _mesa_warning(NULL, "intel_create_sub_image: subimage out of bounds");
-       free(image);
+       FREE(image);
        return NULL;
     }
 
     image->region = calloc(sizeof(*image->region), 1);
     if (image->region == NULL) {
-       free(image);
+       FREE(image);
        return NULL;
     }
 
@@ -644,7 +644,7 @@ intelDestroyScreen(__DRIscreen * sPriv)
    _mesa_HashDeleteAll(intelScreen->named_regions, nop_callback, NULL);
    _mesa_DeleteHashTable(intelScreen->named_regions);
 
-   free(intelScreen);
+   FREE(intelScreen);
    sPriv->driverPrivate = NULL;
 }
 
@@ -1071,7 +1071,7 @@ __DRIconfig **intelInitScreen2(__DRIscreen *psp)
    }
 
    /* Allocate the private area */
-   intelScreen = calloc(1, sizeof *intelScreen);
+   intelScreen = CALLOC(sizeof *intelScreen);
    if (!intelScreen) {
       fprintf(stderr, "\nERROR!  Allocating private area failed\n");
       return false;
@@ -1153,7 +1153,7 @@ intelAllocateBuffer(__DRIscreen *screen,
    assert(attachment == __DRI_BUFFER_FRONT_LEFT ||
           attachment == __DRI_BUFFER_BACK_LEFT);
 
-   intelBuffer = calloc(1, sizeof *intelBuffer);
+   intelBuffer = CALLOC(sizeof *intelBuffer);
    if (intelBuffer == NULL)
       return NULL;
 
@@ -1166,7 +1166,7 @@ intelAllocateBuffer(__DRIscreen *screen,
                                             true);
    
    if (intelBuffer->region == NULL) {
-	   free(intelBuffer);
+	   FREE(intelBuffer);
 	   return NULL;
    }
    
