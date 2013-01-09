@@ -36,6 +36,7 @@ mesa (9.1~git20130109.959e83d6-1) UNRELEASED; urgency=low
   * Update symbols for libgles2-mesa
   * libegl1-mesa-drivers.install.linux: Bump libwayland-egl.so version
   * control: Add libdrm-dev to mesa-common-dev Depends.
+  * Add 16-fix-build.diff.
 
   [ Steve Langasek ]
   * Install all dri drivers from the DESTDIR tree, instead of copying them

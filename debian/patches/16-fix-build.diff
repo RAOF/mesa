@@ -1,0 +1,37 @@
+From 2aefe28c88758759f370877387c9c0d0f9990fc9 Mon Sep 17 00:00:00 2001
+From: Quentin Glidic <sardemff7+git@sardemff7.net>
+Date: Wed, 28 Nov 2012 16:33:47 +0100
+Subject: [PATCH] mesa/program: Fix both Classic and Gallium build
+
+Follow-up for 907844107252260c646aca361191ef7f121f3d23 and
+3a5ad21cd3f026579eeacc25b39513711556c7ee
+
+Bugzilla: https://bugs.freedesktop.org/show_bug.cgi?id=57044
+---
+ configure.ac                 | 3 +++
+ src/mesa/program/Makefile.am | 2 +-
+ 2 files changed, 4 insertions(+), 1 deletion(-)
+
+--- a/configure.ac
++++ b/configure.ac
+@@ -1967,6 +1967,9 @@ AM_CONDITIONAL(HAVE_DRM_LOADER_GALLIUM,
+ AM_CONDITIONAL(HAVE_GALLIUM_COMPUTE, test x$enable_opencl = xyes)
+ AC_SUBST([GALLIUM_MAKE_DIRS])
+ 
++AM_CONDITIONAL(NEED_LIBPROGRAM, test "x$with_gallium_drivers" != x -o \
++                                     "x$enable_xlib_glx" = xyes -o \
++                                     "x$enable_osmesa" = xyes)
+ AM_CONDITIONAL(HAVE_X11_DRIVER, echo "$DRIVER_DIRS" | grep 'x11' >/dev/null 2>&1)
+ 
+ AM_CONDITIONAL(HAVE_X86_ASM, echo "$DEFINES" | grep 'X86_ASM' >/dev/null 2>&1)
+--- a/src/mesa/program/Makefile.am
++++ b/src/mesa/program/Makefile.am
+@@ -35,7 +35,7 @@ DRICORE_LIB = libdricore_program.la
+ endif
+ 
+ noinst_LTLIBRARIES = $(DRICORE_LIB)
+-if HAVE_GALLIUM
++if NEED_LIBPROGRAM
+ noinst_LTLIBRARIES += libprogram.la
+ else
+ check_LTLIBRARIES = libprogram.la
