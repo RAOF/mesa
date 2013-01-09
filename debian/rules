@@ -84,7 +84,7 @@ else
 	DRI_DRIVERS += i915 i965
 	# Radeonsi needs LLVM, so only build it on the subset of archs
 	# where we have LLVM enabled.
-	GALLIUM_DRIVERS += radeonsi
+#	GALLIUM_DRIVERS += radeonsi
     else
 	EXTRA_SED=-e"/radeonsi_dri.so/ s/^/\#/"
     endif
