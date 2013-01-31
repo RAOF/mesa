@@ -75,6 +75,9 @@ static void r300_destroy_context(struct pipe_context* context)
     if (r300->cs && r300->hyperz_enabled) {
         r300->rws->cs_request_feature(r300->cs, RADEON_FID_R300_HYPERZ_ACCESS, FALSE);
     }
+    if (r300->cs && r300->cmask_access) {
+        r300->rws->cs_request_feature(r300->cs, RADEON_FID_R300_CMASK_ACCESS, FALSE);
+    }
 
     if (r300->blitter)
         util_blitter_destroy(r300->blitter);
@@ -200,10 +203,10 @@ static boolean r300_setup_atoms(struct r300_context* r300)
     /* TX. */
     R300_INIT_ATOM(texture_cache_inval, 2);
     R300_INIT_ATOM(textures_state, 0);
-    /* HiZ Clear */
-    R300_INIT_ATOM(hiz_clear, r300->screen->caps.hiz_ram > 0 ? 6 : 0);
-    /* zmask clear */
-    R300_INIT_ATOM(zmask_clear, r300->screen->caps.zmask_ram > 0 ? 6 : 0);
+    /* Clear commands */
+    R300_INIT_ATOM(hiz_clear, r300->screen->caps.hiz_ram > 0 ? 4 : 0);
+    R300_INIT_ATOM(zmask_clear, r300->screen->caps.zmask_ram > 0 ? 4 : 0);
+    R300_INIT_ATOM(cmask_clear, 4);
     /* ZB (unpipelined), SU. */
     R300_INIT_ATOM(query_start, 4);
 
@@ -376,7 +379,7 @@ struct pipe_context* r300_create_context(struct pipe_screen* screen,
                      sizeof(struct pipe_transfer), 64,
                      UTIL_SLAB_SINGLETHREADED);
 
-    r300->cs = rws->cs_create(rws);
+    r300->cs = rws->cs_create(rws, RING_GFX);
     if (r300->cs == NULL)
         goto fail;
 
@@ -456,6 +459,7 @@ struct pipe_context* r300_create_context(struct pipe_screen* screen,
         vb.depth0 = 1;
 
         r300->dummy_vb.buffer = screen->resource_create(screen, &vb);
+        r300->context.set_vertex_buffers(&r300->context, 0, 1, &r300->dummy_vb);
     }
 
     {

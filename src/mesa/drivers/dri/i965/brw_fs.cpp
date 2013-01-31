@@ -455,10 +455,14 @@ fs_visitor::type_size(const struct glsl_type *type)
        * link time.
        */
       return 0;
-   default:
+   case GLSL_TYPE_VOID:
+   case GLSL_TYPE_ERROR:
+   case GLSL_TYPE_INTERFACE:
       assert(!"not reached");
-      return 0;
+      break;
    }
+
+   return 0;
 }
 
 fs_reg
@@ -2585,7 +2589,8 @@ brw_wm_fs_emit(struct brw_context *brw, struct brw_wm_compile *c,
 
    exec_list *simd16_instructions = NULL;
    fs_visitor v2(brw, c, prog, fp, 16);
-   if (intel->gen >= 5 && c->prog_data.nr_pull_params == 0) {
+   bool no16 = INTEL_DEBUG & DEBUG_NO16;
+   if (intel->gen >= 5 && c->prog_data.nr_pull_params == 0 && likely(!no16)) {
       v2.import_uniforms(&v);
       if (!v2.run()) {
          perf_debug("16-wide shader failed to compile, falling back to "

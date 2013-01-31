@@ -56,10 +56,12 @@ struct radeon_llvm_context {
 
 	unsigned chip_class;
 	unsigned type;
-	unsigned face_input;
+	unsigned face_gpr;
 	unsigned two_side;
+	unsigned clip_vertex;
 	struct r600_shader_io * r600_inputs;
 	struct r600_shader_io * r600_outputs;
+	struct pipe_stream_output_info *stream_outputs;
 	unsigned color_buffer_count;
 	unsigned fs_color_all;
 
@@ -106,7 +108,6 @@ struct radeon_llvm_context {
 
 	LLVMValueRef system_values[RADEON_LLVM_MAX_SYSTEM_VALUES];
 
-	unsigned reserved_reg_count;
 	/*=== Private Members ===*/
 
 	struct radeon_llvm_branch branch[RADEON_LLVM_MAX_BRANCH_DEPTH];

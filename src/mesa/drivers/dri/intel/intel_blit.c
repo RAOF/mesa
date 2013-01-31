@@ -144,9 +144,6 @@ intelEmitCopyBlit(struct intel_context *intel,
        src_buffer, src_pitch, src_offset, src_x, src_y,
        dst_buffer, dst_pitch, dst_offset, dst_x, dst_y, w, h);
 
-   src_pitch *= cpp;
-   dst_pitch *= cpp;
-
    /* Blit pitch must be dword-aligned.  Otherwise, the hardware appears to drop
     * the low bits.
     */
@@ -295,7 +292,7 @@ intelClearWithBlit(struct gl_context *ctx, GLbitfield mask)
 
       DBG("%s dst:buf(%p)/%d %d,%d sz:%dx%d\n",
 	  __FUNCTION__,
-	  region->bo, (pitch * cpp),
+	  region->bo, pitch,
 	  x1, y1, x2 - x1, y2 - y1);
 
       BR13 = 0xf0 << 16;
@@ -319,7 +316,7 @@ intelClearWithBlit(struct gl_context *ctx, GLbitfield mask)
 	 pitch /= 4;
       }
 #endif
-      BR13 |= (pitch * cpp);
+      BR13 |= pitch;
 
       if (is_depth_stencil) {
 	 clear_val = clear_depth_value;
@@ -420,8 +417,6 @@ intelEmitImmediateColorExpandBlit(struct intel_context *intel,
 
    if (w < 0 || h < 0)
       return true;
-
-   dst_pitch *= cpp;
 
    DBG("%s dst:buf(%p)/%d+%d %d,%d sz:%dx%d, %d bytes %d dwords\n",
        __FUNCTION__,
@@ -565,7 +560,7 @@ intel_set_teximage_alpha_to_one(struct gl_context *ctx,
 
    DBG("%s dst:buf(%p)/%d %d,%d sz:%dx%d\n",
        __FUNCTION__,
-       intel_image->mt->region->bo, (pitch * cpp),
+       intel_image->mt->region->bo, pitch,
        x1, y1, x2 - x1, y2 - y1);
 
    BR13 = br13_for_cpp(cpp) | 0xf0 << 16;
@@ -580,7 +575,7 @@ intel_set_teximage_alpha_to_one(struct gl_context *ctx,
       pitch /= 4;
    }
 #endif
-   BR13 |= (pitch * cpp);
+   BR13 |= pitch;
 
    /* do space check before going any further */
    aper_array[0] = intel->batch.bo;

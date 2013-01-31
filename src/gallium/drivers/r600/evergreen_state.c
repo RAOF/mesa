@@ -30,6 +30,20 @@
 #include "util/u_framebuffer.h"
 #include "util/u_dual_blend.h"
 #include "evergreen_compute.h"
+#include "util/u_math.h"
+
+static INLINE unsigned evergreen_array_mode(unsigned mode)
+{
+	switch (mode) {
+	case RADEON_SURF_MODE_LINEAR_ALIGNED:	return V_028C70_ARRAY_LINEAR_ALIGNED;
+		break;
+	case RADEON_SURF_MODE_1D:		return V_028C70_ARRAY_1D_TILED_THIN1;
+		break;
+	case RADEON_SURF_MODE_2D:		return V_028C70_ARRAY_2D_TILED_THIN1;
+	default:
+	case RADEON_SURF_MODE_LINEAR:		return V_028C70_ARRAY_LINEAR_GENERAL;
+	}
+}
 
 static uint32_t eg_num_banks(uint32_t nbanks)
 {
@@ -969,6 +983,58 @@ static void *evergreen_create_sampler_state(struct pipe_context *ctx,
 	return ss;
 }
 
+static struct pipe_sampler_view *
+texture_buffer_sampler_view(struct r600_pipe_sampler_view *view,
+			    unsigned width0, unsigned height0)
+			    
+{
+	struct pipe_context *ctx = view->base.context;
+	struct r600_texture *tmp = (struct r600_texture*)view->base.texture;
+	uint64_t va;
+	int stride = util_format_get_blocksize(view->base.format);
+	unsigned format, num_format, format_comp, endian;
+	unsigned swizzle_res;
+	unsigned char swizzle[4];
+	const struct util_format_description *desc;
+
+	swizzle[0] = view->base.swizzle_r;
+	swizzle[1] = view->base.swizzle_g;
+	swizzle[2] = view->base.swizzle_b;
+	swizzle[3] = view->base.swizzle_a;
+
+	r600_vertex_data_type(view->base.format,
+			      &format, &num_format, &format_comp,
+			      &endian);
+
+	desc = util_format_description(view->base.format);
+
+	swizzle_res = r600_get_swizzle_combined(desc->swizzle, swizzle, TRUE);
+
+	va = r600_resource_va(ctx->screen, view->base.texture);
+	view->tex_resource = &tmp->resource;
+
+	view->skip_mip_address_reloc = true;
+	view->tex_resource_words[0] = va;
+	view->tex_resource_words[1] = width0 - 1;
+	view->tex_resource_words[2] = S_030008_BASE_ADDRESS_HI(va >> 32UL) |
+		S_030008_STRIDE(stride) |
+		S_030008_DATA_FORMAT(format) |
+		S_030008_NUM_FORMAT_ALL(num_format) |
+		S_030008_FORMAT_COMP_ALL(format_comp) |
+		S_030008_SRF_MODE_ALL(1) |
+		S_030008_ENDIAN_SWAP(endian);
+	view->tex_resource_words[3] = swizzle_res;
+	/*
+	 * in theory dword 4 is for number of elements, for use with resinfo,
+	 * but it seems to utterly fail to work, the amd gpu shader analyser
+	 * uses a const buffer to store the element sizes for buffer txq
+	 */
+	view->tex_resource_words[4] = 0;
+	view->tex_resource_words[5] = view->tex_resource_words[6] = 0;
+	view->tex_resource_words[7] = S_03001C_TYPE(V_03001C_SQ_TEX_VTX_VALID_BUFFER);
+	return &view->base;
+}
+
 struct pipe_sampler_view *
 evergreen_create_sampler_view_custom(struct pipe_context *ctx,
 				     struct pipe_resource *texture,
@@ -996,6 +1062,9 @@ evergreen_create_sampler_view_custom(struct pipe_context *ctx,
 	view->base.texture = texture;
 	view->base.reference.count = 1;
 	view->base.context = ctx;
+
+	if (texture->target == PIPE_BUFFER)
+		return texture_buffer_sampler_view(view, width0, height0);
 
 	swizzle[0] = state->swizzle_r;
 	swizzle[1] = state->swizzle_g;
@@ -1035,7 +1104,7 @@ evergreen_create_sampler_view_custom(struct pipe_context *ctx,
 
 	width = width0;
 	height = height0;
-	depth = surflevel[0].npix_z;
+	depth = texture->depth0;
 	pitch = surflevel[0].nblk_x * util_format_get_blockwidth(pipe_format);
 	non_disp_tiling = tmp->non_disp_tiling;
 
@@ -1147,7 +1216,7 @@ evergreen_create_sampler_view(struct pipe_context *ctx,
 
 static void evergreen_emit_clip_state(struct r600_context *rctx, struct r600_atom *atom)
 {
-	struct radeon_winsys_cs *cs = rctx->cs;
+	struct radeon_winsys_cs *cs = rctx->rings.gfx.cs;
 	struct pipe_clip_state *state = &rctx->clip_state.state;
 
 	r600_write_context_reg_seq(cs, R_0285BC_PA_CL_UCP0_X, 6*4);
@@ -1190,7 +1259,7 @@ static void evergreen_set_scissor_state(struct pipe_context *ctx,
 
 static void evergreen_emit_scissor_state(struct r600_context *rctx, struct r600_atom *atom)
 {
-	struct radeon_winsys_cs *cs = rctx->cs;
+	struct radeon_winsys_cs *cs = rctx->rings.gfx.cs;
 	struct pipe_scissor_state *state = &rctx->scissor.scissor;
 	uint32_t tl, br;
 
@@ -1548,7 +1617,7 @@ static void evergreen_init_depth_surface(struct r600_context *rctx,
 	surf->htile_enabled = 0;
 	/* use htile only for first level */
 	if (rtex->htile && !level) {
-		uint64_t va = r600_resource_va(rctx->screen, rtex->htile);
+		uint64_t va = r600_resource_va(&rctx->screen->screen, &rtex->htile->b.b);
 		surf->htile_enabled = 1;
 		surf->db_htile_data_base = va >> 8;
 		surf->db_htile_surface = S_028ABC_HTILE_WIDTH(1) |
@@ -1756,7 +1825,7 @@ static void evergreen_emit_msaa_state(struct r600_context *rctx, int nr_samples)
 	};
 	static unsigned max_dist_8x = 7;
 
-	struct radeon_winsys_cs *cs = rctx->cs;
+	struct radeon_winsys_cs *cs = rctx->rings.gfx.cs;
 	unsigned max_dist = 0;
 
 	switch (nr_samples) {
@@ -1846,7 +1915,7 @@ static void cayman_emit_msaa_state(struct r600_context *rctx, int nr_samples)
 	};
 	static unsigned max_dist_16x = 8;
 
-	struct radeon_winsys_cs *cs = rctx->cs;
+	struct radeon_winsys_cs *cs = rctx->rings.gfx.cs;
 	unsigned max_dist = 0;
 
 	switch (nr_samples) {
@@ -1937,7 +2006,7 @@ static void cayman_emit_msaa_state(struct r600_context *rctx, int nr_samples)
 
 static void evergreen_emit_framebuffer_state(struct r600_context *rctx, struct r600_atom *atom)
 {
-	struct radeon_winsys_cs *cs = rctx->cs;
+	struct radeon_winsys_cs *cs = rctx->rings.gfx.cs;
 	struct pipe_framebuffer_state *state = &rctx->framebuffer.state;
 	unsigned nr_cbufs = state->nr_cbufs;
 	unsigned i, tl, br;
@@ -1950,7 +2019,9 @@ static void evergreen_emit_framebuffer_state(struct r600_context *rctx, struct r
 	/* Colorbuffers. */
 	for (i = 0; i < nr_cbufs; i++) {
 		struct r600_surface *cb = (struct r600_surface*)state->cbufs[i];
-		unsigned reloc = r600_context_bo_reloc(rctx, (struct r600_resource*)cb->base.texture,
+		unsigned reloc = r600_context_bo_reloc(rctx,
+						       &rctx->rings.gfx,
+						       (struct r600_resource*)cb->base.texture,
 						       RADEON_USAGE_READWRITE);
 
 		r600_write_context_reg_seq(cs, R_028C60_CB_COLOR0_BASE + i * 0x3C, 11);
@@ -1989,7 +2060,9 @@ static void evergreen_emit_framebuffer_state(struct r600_context *rctx, struct r
 				       ((struct r600_surface*)state->cbufs[0])->cb_color_info);
 
 		if (!rctx->keep_tiling_flags) {
-			unsigned reloc = r600_context_bo_reloc(rctx, (struct r600_resource*)state->cbufs[0]->texture,
+			unsigned reloc = r600_context_bo_reloc(rctx,
+							       &rctx->rings.gfx,
+							       (struct r600_resource*)state->cbufs[0]->texture,
 							       RADEON_USAGE_READWRITE);
 
 			r600_write_value(cs, PKT3(PKT3_NOP, 0, 0)); /* R_028C70_CB_COLOR0_INFO */
@@ -2009,7 +2082,9 @@ static void evergreen_emit_framebuffer_state(struct r600_context *rctx, struct r
 	/* ZS buffer. */
 	if (state->zsbuf) {
 		struct r600_surface *zb = (struct r600_surface*)state->zsbuf;
-		unsigned reloc = r600_context_bo_reloc(rctx, (struct r600_resource*)state->zsbuf->texture,
+		unsigned reloc = r600_context_bo_reloc(rctx,
+						       &rctx->rings.gfx,
+						       (struct r600_resource*)state->zsbuf->texture,
 						       RADEON_USAGE_READWRITE);
 
 		r600_write_context_reg(cs, R_028B78_PA_SU_POLY_OFFSET_DB_FMT_CNTL,
@@ -2066,7 +2141,7 @@ static void evergreen_emit_framebuffer_state(struct r600_context *rctx, struct r
 
 static void evergreen_emit_polygon_offset(struct r600_context *rctx, struct r600_atom *a)
 {
-	struct radeon_winsys_cs *cs = rctx->cs;
+	struct radeon_winsys_cs *cs = rctx->rings.gfx.cs;
 	struct r600_poly_offset_state *state = (struct r600_poly_offset_state*)a;
 	float offset_units = state->offset_units;
 	float offset_scale = state->offset_scale;
@@ -2091,7 +2166,7 @@ static void evergreen_emit_polygon_offset(struct r600_context *rctx, struct r600
 
 static void evergreen_emit_cb_misc_state(struct r600_context *rctx, struct r600_atom *atom)
 {
-	struct radeon_winsys_cs *cs = rctx->cs;
+	struct radeon_winsys_cs *cs = rctx->rings.gfx.cs;
 	struct r600_cb_misc_state *a = (struct r600_cb_misc_state*)atom;
 	unsigned fb_colormask = (1ULL << ((unsigned)a->nr_cbufs * 4)) - 1;
 	unsigned ps_colormask = (1ULL << ((unsigned)a->nr_ps_color_outputs * 4)) - 1;
@@ -2106,7 +2181,7 @@ static void evergreen_emit_cb_misc_state(struct r600_context *rctx, struct r600_
 
 static void evergreen_emit_db_state(struct r600_context *rctx, struct r600_atom *atom)
 {
-	struct radeon_winsys_cs *cs = rctx->cs;
+	struct radeon_winsys_cs *cs = rctx->rings.gfx.cs;
 	struct r600_db_state *a = (struct r600_db_state*)atom;
 
 	if (a->rsurf && a->rsurf->htile_enabled) {
@@ -2117,7 +2192,7 @@ static void evergreen_emit_db_state(struct r600_context *rctx, struct r600_atom 
 		r600_write_context_reg(cs, R_028ABC_DB_HTILE_SURFACE, a->rsurf->db_htile_surface);
 		r600_write_context_reg(cs, R_028AC8_DB_PRELOAD_CONTROL, a->rsurf->db_preload_control);
 		r600_write_context_reg(cs, R_028014_DB_HTILE_DATA_BASE, a->rsurf->db_htile_data_base);
-		reloc_idx = r600_context_bo_reloc(rctx, rtex->htile, RADEON_USAGE_READWRITE);
+		reloc_idx = r600_context_bo_reloc(rctx, &rctx->rings.gfx, rtex->htile, RADEON_USAGE_READWRITE);
 		cs->buf[cs->cdw++] = PKT3(PKT3_NOP, 0, 0);
 		cs->buf[cs->cdw++] = reloc_idx;
 	} else {
@@ -2128,7 +2203,7 @@ static void evergreen_emit_db_state(struct r600_context *rctx, struct r600_atom 
 
 static void evergreen_emit_db_misc_state(struct r600_context *rctx, struct r600_atom *atom)
 {
-	struct radeon_winsys_cs *cs = rctx->cs;
+	struct radeon_winsys_cs *cs = rctx->rings.gfx.cs;
 	struct r600_db_misc_state *a = (struct r600_db_misc_state*)atom;
 	unsigned db_render_control = 0;
 	unsigned db_count_control = 0;
@@ -2178,7 +2253,7 @@ static void evergreen_emit_vertex_buffers(struct r600_context *rctx,
 					  unsigned resource_offset,
 					  unsigned pkt_flags)
 {
-	struct radeon_winsys_cs *cs = rctx->cs;
+	struct radeon_winsys_cs *cs = rctx->rings.gfx.cs;
 	uint32_t dirty_mask = state->dirty_mask;
 
 	while (dirty_mask) {
@@ -2214,7 +2289,7 @@ static void evergreen_emit_vertex_buffers(struct r600_context *rctx,
 		r600_write_value(cs, 0xc0000000); /* RESOURCEi_WORD7 */
 
 		r600_write_value(cs, PKT3(PKT3_NOP, 0, 0) | pkt_flags);
-		r600_write_value(cs, r600_context_bo_reloc(rctx, rbuffer, RADEON_USAGE_READ));
+		r600_write_value(cs, r600_context_bo_reloc(rctx, &rctx->rings.gfx, rbuffer, RADEON_USAGE_READ));
 	}
 	state->dirty_mask = 0;
 }
@@ -2236,7 +2311,7 @@ static void evergreen_emit_constant_buffers(struct r600_context *rctx,
 					    unsigned reg_alu_constbuf_size,
 					    unsigned reg_alu_const_cache)
 {
-	struct radeon_winsys_cs *cs = rctx->cs;
+	struct radeon_winsys_cs *cs = rctx->rings.gfx.cs;
 	uint32_t dirty_mask = state->dirty_mask;
 
 	while (dirty_mask) {
@@ -2257,7 +2332,7 @@ static void evergreen_emit_constant_buffers(struct r600_context *rctx,
 		r600_write_context_reg(cs, reg_alu_const_cache + buffer_index * 4, va >> 8);
 
 		r600_write_value(cs, PKT3(PKT3_NOP, 0, 0));
-		r600_write_value(cs, r600_context_bo_reloc(rctx, rbuffer, RADEON_USAGE_READ));
+		r600_write_value(cs, r600_context_bo_reloc(rctx, &rctx->rings.gfx, rbuffer, RADEON_USAGE_READ));
 
 		r600_write_value(cs, PKT3(PKT3_SET_RESOURCE, 8, 0));
 		r600_write_value(cs, (buffer_id_base + buffer_index) * 8);
@@ -2278,7 +2353,7 @@ static void evergreen_emit_constant_buffers(struct r600_context *rctx,
 		r600_write_value(cs, 0xc0000000); /* RESOURCEi_WORD7 */
 
 		r600_write_value(cs, PKT3(PKT3_NOP, 0, 0));
-		r600_write_value(cs, r600_context_bo_reloc(rctx, rbuffer, RADEON_USAGE_READ));
+		r600_write_value(cs, r600_context_bo_reloc(rctx, &rctx->rings.gfx, rbuffer, RADEON_USAGE_READ));
 
 		dirty_mask &= ~(1 << buffer_index);
 	}
@@ -2310,7 +2385,7 @@ static void evergreen_emit_sampler_views(struct r600_context *rctx,
 					 struct r600_samplerview_state *state,
 					 unsigned resource_id_base)
 {
-	struct radeon_winsys_cs *cs = rctx->cs;
+	struct radeon_winsys_cs *cs = rctx->rings.gfx.cs;
 	uint32_t dirty_mask = state->dirty_mask;
 
 	while (dirty_mask) {
@@ -2325,7 +2400,7 @@ static void evergreen_emit_sampler_views(struct r600_context *rctx,
 		r600_write_value(cs, (resource_id_base + resource_index) * 8);
 		r600_write_array(cs, 8, rview->tex_resource_words);
 
-		reloc = r600_context_bo_reloc(rctx, rview->tex_resource,
+		reloc = r600_context_bo_reloc(rctx, &rctx->rings.gfx, rview->tex_resource,
 					      RADEON_USAGE_READ);
 		r600_write_value(cs, PKT3(PKT3_NOP, 0, 0));
 		r600_write_value(cs, reloc);
@@ -2358,7 +2433,7 @@ static void evergreen_emit_sampler_states(struct r600_context *rctx,
 				unsigned resource_id_base,
 				unsigned border_index_reg)
 {
-	struct radeon_winsys_cs *cs = rctx->cs;
+	struct radeon_winsys_cs *cs = rctx->rings.gfx.cs;
 	uint32_t dirty_mask = texinfo->states.dirty_mask;
 
 	while (dirty_mask) {
@@ -2401,14 +2476,14 @@ static void evergreen_emit_sample_mask(struct r600_context *rctx, struct r600_at
 	struct r600_sample_mask *s = (struct r600_sample_mask*)a;
 	uint8_t mask = s->sample_mask;
 
-	r600_write_context_reg(rctx->cs, R_028C3C_PA_SC_AA_MASK,
+	r600_write_context_reg(rctx->rings.gfx.cs, R_028C3C_PA_SC_AA_MASK,
 			       mask | (mask << 8) | (mask << 16) | (mask << 24));
 }
 
 static void cayman_emit_sample_mask(struct r600_context *rctx, struct r600_atom *a)
 {
 	struct r600_sample_mask *s = (struct r600_sample_mask*)a;
-	struct radeon_winsys_cs *cs = rctx->cs;
+	struct radeon_winsys_cs *cs = rctx->rings.gfx.cs;
 	uint16_t mask = s->sample_mask;
 
 	r600_write_context_reg_seq(cs, CM_R_028C38_PA_SC_AA_MASK_X0Y0_X1Y0, 2);
@@ -2418,14 +2493,14 @@ static void cayman_emit_sample_mask(struct r600_context *rctx, struct r600_atom 
 
 static void evergreen_emit_vertex_fetch_shader(struct r600_context *rctx, struct r600_atom *a)
 {
-	struct radeon_winsys_cs *cs = rctx->cs;
+	struct radeon_winsys_cs *cs = rctx->rings.gfx.cs;
 	struct r600_cso_state *state = (struct r600_cso_state*)a;
 	struct r600_fetch_shader *shader = (struct r600_fetch_shader*)state->cso;
 
 	r600_write_context_reg(cs, R_0288A4_SQ_PGM_START_FS,
 			       (r600_resource_va(rctx->context.screen, &shader->buffer->b.b) + shader->offset) >> 8);
 	r600_write_value(cs, PKT3(PKT3_NOP, 0, 0));
-	r600_write_value(cs, r600_context_bo_reloc(rctx, shader->buffer, RADEON_USAGE_READ));
+	r600_write_value(cs, r600_context_bo_reloc(rctx, &rctx->rings.gfx, shader->buffer, RADEON_USAGE_READ));
 }
 
 void evergreen_init_state_functions(struct r600_context *rctx)
@@ -3383,4 +3458,191 @@ void evergreen_update_db_shader_control(struct r600_context * rctx)
 		rctx->db_misc_state.db_shader_control = db_shader_control;
 		rctx->db_misc_state.atom.dirty = true;
 	}
+}
+
+static void evergreen_dma_copy_tile(struct r600_context *rctx,
+				struct pipe_resource *dst,
+				unsigned dst_level,
+				unsigned dst_x,
+				unsigned dst_y,
+				unsigned dst_z,
+				struct pipe_resource *src,
+				unsigned src_level,
+				unsigned src_x,
+				unsigned src_y,
+				unsigned src_z,
+				unsigned copy_height,
+				unsigned pitch,
+				unsigned bpp)
+{
+	struct radeon_winsys_cs *cs = rctx->rings.dma.cs;
+	struct r600_texture *rsrc = (struct r600_texture*)src;
+	struct r600_texture *rdst = (struct r600_texture*)dst;
+	unsigned array_mode, lbpp, pitch_tile_max, slice_tile_max, size;
+	unsigned ncopy, height, cheight, detile, i, x, y, z, src_mode, dst_mode;
+	unsigned sub_cmd, bank_h, bank_w, mt_aspect, nbanks, tile_split;
+	uint64_t base, addr;
+
+	/* make sure that the dma ring is only one active */
+	rctx->rings.gfx.flush(rctx, RADEON_FLUSH_ASYNC);
+
+	dst_mode = rdst->surface.level[dst_level].mode;
+	src_mode = rsrc->surface.level[src_level].mode;
+	/* downcast linear aligned to linear to simplify test */
+	src_mode = src_mode == RADEON_SURF_MODE_LINEAR_ALIGNED ? RADEON_SURF_MODE_LINEAR : src_mode;
+	dst_mode = dst_mode == RADEON_SURF_MODE_LINEAR_ALIGNED ? RADEON_SURF_MODE_LINEAR : dst_mode;
+	assert(dst_mode != src_mode);
+
+	y = 0;
+	sub_cmd = 0x8;
+	lbpp = util_logbase2(bpp);
+	pitch_tile_max = ((pitch / bpp) >> 3) - 1;
+	nbanks = eg_num_banks(rctx->screen->tiling_info.num_banks);
+
+	if (dst_mode == RADEON_SURF_MODE_LINEAR) {
+		/* T2L */
+		array_mode = evergreen_array_mode(src_mode);
+		slice_tile_max = (((pitch * rsrc->surface.level[src_level].npix_y) >> 6) / bpp) - 1;
+		/* linear height must be the same as the slice tile max height, it's ok even
+		 * if the linear destination/source have smaller heigh as the size of the
+		 * dma packet will be using the copy_height which is always smaller or equal
+		 * to the linear height
+		 */
+		height = rsrc->surface.level[src_level].npix_y;
+		detile = 1;
+		x = src_x;
+		y = src_y;
+		z = src_z;
+		base = rsrc->surface.level[src_level].offset;
+		addr = rdst->surface.level[dst_level].offset;
+		addr += rdst->surface.level[dst_level].slice_size * dst_z;
+		addr += dst_y * pitch + dst_x * bpp;
+		bank_h = eg_bank_wh(rsrc->surface.bankh);
+		bank_w = eg_bank_wh(rsrc->surface.bankw);
+		mt_aspect = eg_macro_tile_aspect(rsrc->surface.mtilea);
+		tile_split = eg_tile_split(rsrc->surface.tile_split);
+		base += r600_resource_va(&rctx->screen->screen, src);
+		addr += r600_resource_va(&rctx->screen->screen, dst);
+	} else {
+		/* L2T */
+		array_mode = evergreen_array_mode(dst_mode);
+		slice_tile_max = (((pitch * rdst->surface.level[dst_level].npix_y) >> 6) / bpp) - 1;
+		/* linear height must be the same as the slice tile max height, it's ok even
+		 * if the linear destination/source have smaller heigh as the size of the
+		 * dma packet will be using the copy_height which is always smaller or equal
+		 * to the linear height
+		 */
+		height = rdst->surface.level[dst_level].npix_y;
+		detile = 0;
+		x = dst_x;
+		y = dst_y;
+		z = dst_z;
+		base = rdst->surface.level[dst_level].offset;
+		addr = rsrc->surface.level[src_level].offset;
+		addr += rsrc->surface.level[src_level].slice_size * src_z;
+		addr += src_y * pitch + src_x * bpp;
+		bank_h = eg_bank_wh(rdst->surface.bankh);
+		bank_w = eg_bank_wh(rdst->surface.bankw);
+		mt_aspect = eg_macro_tile_aspect(rdst->surface.mtilea);
+		tile_split = eg_tile_split(rdst->surface.tile_split);
+		base += r600_resource_va(&rctx->screen->screen, dst);
+		addr += r600_resource_va(&rctx->screen->screen, src);
+	}
+
+	size = (copy_height * pitch) >> 2;
+	ncopy = (size / 0x000fffff) + !!(size % 0x000fffff);
+	r600_need_dma_space(rctx, ncopy * 9);
+
+	for (i = 0; i < ncopy; i++) {
+		cheight = copy_height;
+		if (((cheight * pitch) >> 2) > 0x000fffff) {
+			cheight = (0x000fffff << 2) / pitch;
+		}
+		size = (cheight * pitch) >> 2;
+		/* emit reloc before writting cs so that cs is always in consistent state */
+		r600_context_bo_reloc(rctx, &rctx->rings.dma, &rsrc->resource, RADEON_USAGE_READ);
+		r600_context_bo_reloc(rctx, &rctx->rings.dma, &rdst->resource, RADEON_USAGE_WRITE);
+		cs->buf[cs->cdw++] = DMA_PACKET(DMA_PACKET_COPY, sub_cmd, size);
+		cs->buf[cs->cdw++] = base >> 8;
+		cs->buf[cs->cdw++] = (detile << 31) | (array_mode << 27) |
+					(lbpp << 24) | (bank_h << 21) |
+					(bank_w << 18) | (mt_aspect << 16);
+		cs->buf[cs->cdw++] = (pitch_tile_max << 0) | ((height - 1) << 16);
+		cs->buf[cs->cdw++] = (slice_tile_max << 0);
+		cs->buf[cs->cdw++] = (x << 0) | (z << 18);
+		cs->buf[cs->cdw++] = (y << 0) | (tile_split << 21) | (nbanks << 25);
+		cs->buf[cs->cdw++] = addr & 0xfffffffc;
+		cs->buf[cs->cdw++] = (addr >> 32UL) & 0xff;
+		copy_height -= cheight;
+		addr += cheight * pitch;
+		y += cheight;
+	}
+}
+
+boolean evergreen_dma_blit(struct pipe_context *ctx,
+			struct pipe_resource *dst,
+			unsigned dst_level,
+			unsigned dst_x, unsigned dst_y, unsigned dst_z,
+			struct pipe_resource *src,
+			unsigned src_level,
+			const struct pipe_box *src_box)
+{
+	struct r600_context *rctx = (struct r600_context *)ctx;
+	struct r600_texture *rsrc = (struct r600_texture*)src;
+	struct r600_texture *rdst = (struct r600_texture*)dst;
+	unsigned dst_pitch, src_pitch, bpp, dst_mode, src_mode, copy_height;
+	unsigned src_w, dst_w;
+
+	if (rctx->rings.dma.cs == NULL) {
+		return FALSE;
+	}
+	if (src->format != dst->format) {
+		return FALSE;
+	}
+
+	bpp = rdst->surface.bpe;
+	dst_pitch = rdst->surface.level[dst_level].pitch_bytes;
+	src_pitch = rsrc->surface.level[src_level].pitch_bytes;
+	src_w = rsrc->surface.level[src_level].npix_x;
+	dst_w = rdst->surface.level[dst_level].npix_x;
+	copy_height = src_box->height / rsrc->surface.blk_h;
+
+	dst_mode = rdst->surface.level[dst_level].mode;
+	src_mode = rsrc->surface.level[src_level].mode;
+	/* downcast linear aligned to linear to simplify test */
+	src_mode = src_mode == RADEON_SURF_MODE_LINEAR_ALIGNED ? RADEON_SURF_MODE_LINEAR : src_mode;
+	dst_mode = dst_mode == RADEON_SURF_MODE_LINEAR_ALIGNED ? RADEON_SURF_MODE_LINEAR : dst_mode;
+
+	if (src_pitch != dst_pitch || src_box->x || dst_x || src_w != dst_w) {
+		/* FIXME evergreen can do partial blit */
+		return FALSE;
+	}
+	/* the x test here are currently useless (because we don't support partial blit)
+	 * but keep them around so we don't forget about those
+	 */
+	if ((src_pitch & 0x7) || (src_box->x & 0x7) || (dst_x & 0x7) || (src_box->y & 0x7) || (dst_y & 0x7)) {
+		return FALSE;
+	}
+
+	if (src_mode == dst_mode) {
+		uint64_t dst_offset, src_offset;
+		/* simple dma blit would do NOTE code here assume :
+		 *   src_box.x/y == 0
+		 *   dst_x/y == 0
+		 *   dst_pitch == src_pitch
+		 */
+		src_offset= rsrc->surface.level[src_level].offset;
+		src_offset += rsrc->surface.level[src_level].slice_size * src_box->z;
+		src_offset += src_box->y * src_pitch + src_box->x * bpp;
+		dst_offset = rdst->surface.level[dst_level].offset;
+		dst_offset += rdst->surface.level[dst_level].slice_size * dst_z;
+		dst_offset += dst_y * dst_pitch + dst_x * bpp;
+		evergreen_dma_copy(rctx, dst, src, dst_offset, src_offset,
+					src_box->height * src_pitch);
+	} else {
+		evergreen_dma_copy_tile(rctx, dst, dst_level, dst_x, dst_y, dst_z,
+					src, src_level, src_box->x, src_box->y, src_box->z,
+					copy_height, dst_pitch, bpp);
+	}
+	return TRUE;
 }

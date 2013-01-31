@@ -3641,7 +3641,11 @@ extract_float_rgba(GLuint n, GLfloat rgba[][4],
                rgba[i][rDst] = ((p      ) & 0x3ff) * rs;
                rgba[i][gDst] = ((p >> 10) & 0x3ff) * gs;
                rgba[i][bDst] = ((p >> 20) & 0x3ff) * bs;
-               rgba[i][aDst] = ((p >> 30)        ) * as;
+               if (aSrc < 0) {
+                  rgba[i][aDst] = 1.0F;
+               } else {
+                  rgba[i][aDst] = (p >> 30) * as;
+               }
             }
          }
          else {
@@ -3652,7 +3656,11 @@ extract_float_rgba(GLuint n, GLfloat rgba[][4],
                rgba[i][rDst] = ((p      ) & 0x3ff) * rs;
                rgba[i][gDst] = ((p >> 10) & 0x3ff) * gs;
                rgba[i][bDst] = ((p >> 20) & 0x3ff) * bs;
-               rgba[i][aDst] = ((p >> 30)        ) * as;
+               if (aSrc < 0) {
+                  rgba[i][aDst] = 1.0F;
+               } else {
+                  rgba[i][aDst] = (p >> 30) * as;
+               }
             }
          }
          break;
@@ -6014,6 +6022,11 @@ _mesa_rebase_rgba_float(GLuint n, GLfloat rgba[][4], GLenum baseFormat)
          rgba[i][BCOMP] = 0.0F;
       }
       break;
+   case GL_RGB:
+      for (i = 0; i < n; i++) {
+         rgba[i][ACOMP] = 1.0F;
+      }
+      break;
    default:
       /* no-op */
       ;
@@ -6050,6 +6063,11 @@ _mesa_rebase_rgba_uint(GLuint n, GLuint rgba[][4], GLenum baseFormat)
       for (i = 0; i < n; i++) {
          rgba[i][GCOMP] = 0;
          rgba[i][BCOMP] = 0;
+      }
+      break;
+   case GL_RGB:
+      for (i = 0; i < n; i++) {
+         rgba[i][ACOMP] = 1;
       }
       break;
    default:

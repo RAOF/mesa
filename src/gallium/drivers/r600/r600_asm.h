@@ -213,6 +213,7 @@ struct r600_bytecode {
 	struct r600_cf_callstack	callstack[SQ_MAX_CALL_DEPTH];
 	unsigned	ar_loaded;
 	unsigned	ar_reg;
+	unsigned	ar_chan;
 	unsigned        ar_handling;
 	unsigned        r6xx_nop_after_rel_dst;
 };
@@ -250,4 +251,6 @@ void r700_bytecode_alu_read(struct r600_bytecode_alu *alu, uint32_t word0, uint3
 void r600_bytecode_export_read(struct r600_bytecode_output *output, uint32_t word0, uint32_t word1);
 void eg_bytecode_export_read(struct r600_bytecode_output *output, uint32_t word0, uint32_t word1);
 
+void r600_vertex_data_type(enum pipe_format pformat, unsigned *format,
+			   unsigned *num_format, unsigned *format_comp, unsigned *endian);
 #endif

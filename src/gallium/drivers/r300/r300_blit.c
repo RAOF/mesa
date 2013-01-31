@@ -26,6 +26,7 @@
 #include "r300_reg.h"
 
 #include "util/u_format.h"
+#include "util/u_half.h"
 #include "util/u_pack_color.h"
 #include "util/u_surface.h"
 
@@ -135,7 +136,8 @@ static boolean r300_cbzb_clear_allowed(struct r300_context *r300,
     return r300_surface(fb->cbufs[0])->cbzb_allowed;
 }
 
-static boolean r300_fast_zclear_allowed(struct r300_context *r300)
+static boolean r300_fast_zclear_allowed(struct r300_context *r300,
+                                        unsigned clear_buffers)
 {
     struct pipe_framebuffer_state *fb =
         (struct pipe_framebuffer_state*)r300->fb_state.state;
@@ -173,6 +175,25 @@ static uint32_t r300_hiz_clear_value(double depth)
     uint32_t r = (uint32_t)(CLAMP(depth, 0, 1) * 255.5);
     assert(r <= 255);
     return r | (r << 8) | (r << 16) | (r << 24);
+}
+
+static void r300_set_clear_color(struct r300_context *r300,
+                                 const union pipe_color_union *color)
+{
+    struct pipe_framebuffer_state *fb =
+        (struct pipe_framebuffer_state*)r300->fb_state.state;
+    union util_color uc;
+
+    memset(&uc, 0, sizeof(uc));
+    util_pack_color(color->f, fb->cbufs[0]->format, &uc);
+
+    if (fb->cbufs[0]->format == PIPE_FORMAT_R16G16B16A16_FLOAT) {
+        /* (0,1,2,3) maps to (B,G,R,A) */
+        r300->color_clear_value_gb = uc.h[0] | ((uint32_t)uc.h[1] << 16);
+        r300->color_clear_value_ar = uc.h[2] | ((uint32_t)uc.h[3] << 16);
+    } else {
+        r300->color_clear_value = uc.ui;
+    }
 }
 
 DEBUG_GET_ONCE_BOOL_OPTION(hyperz, "RADEON_HYPERZ", FALSE)
@@ -237,13 +258,20 @@ static void r300_clear(struct pipe_context* pipe,
     uint32_t height = fb->height;
     uint32_t hyperz_dcv = hyperz->zb_depthclearvalue;
 
-    /* Enable fast Z clear.
+    /* Use fast Z clear.
      * The zbuffer must be in micro-tiled mode, otherwise it locks up. */
     if (buffers & PIPE_CLEAR_DEPTHSTENCIL) {
         boolean zmask_clear, hiz_clear;
 
-        zmask_clear = r300_fast_zclear_allowed(r300);
-        hiz_clear = r300_hiz_clear_allowed(r300);
+        /* If both depth and stencil are present, they must be cleared together. */
+        if (fb->zsbuf->texture->format == PIPE_FORMAT_S8_UINT_Z24_UNORM &&
+            (buffers & PIPE_CLEAR_DEPTHSTENCIL) != PIPE_CLEAR_DEPTHSTENCIL) {
+            zmask_clear = FALSE;
+            hiz_clear = FALSE;
+        } else {
+            zmask_clear = r300_fast_zclear_allowed(r300, buffers);
+            hiz_clear = r300_hiz_clear_allowed(r300);
+        }
 
         /* If we need Hyper-Z. */
         if (zmask_clear || hiz_clear) {
@@ -262,28 +290,64 @@ static void r300_clear(struct pipe_context* pipe,
 
             /* Setup Hyper-Z clears. */
             if (r300->hyperz_enabled) {
-                DBG(r300, DBG_HYPERZ, "r300: Clear memory: %s%s\n",
-                    zmask_clear ? "ZMASK " : "", hiz_clear ? "HIZ" : "");
-
                 if (zmask_clear) {
                     hyperz_dcv = hyperz->zb_depthclearvalue =
                         r300_depth_clear_value(fb->zsbuf->format, depth, stencil);
 
                     r300_mark_atom_dirty(r300, &r300->zmask_clear);
+                    r300_mark_atom_dirty(r300, &r300->gpu_flush);
                     buffers &= ~PIPE_CLEAR_DEPTHSTENCIL;
                 }
 
                 if (hiz_clear) {
                     r300->hiz_clear_value = r300_hiz_clear_value(depth);
                     r300_mark_atom_dirty(r300, &r300->hiz_clear);
+                    r300_mark_atom_dirty(r300, &r300->gpu_flush);
                 }
                 r300->num_z_clears++;
             }
         }
     }
 
+    /* Use fast color clear for an AA colorbuffer.
+     * The CMASK is shared between all colorbuffers, so we use it
+     * if there is only one colorbuffer bound. */
+    if ((buffers & PIPE_CLEAR_COLOR) && fb->nr_cbufs == 1 &&
+        r300_resource(fb->cbufs[0]->texture)->tex.cmask_dwords) {
+        /* Try to obtain the access to the CMASK if we don't have one. */
+        if (!r300->cmask_access) {
+            r300->cmask_access =
+                r300->rws->cs_request_feature(r300->cs,
+                                              RADEON_FID_R300_CMASK_ACCESS,
+                                              TRUE);
+        }
+
+        /* Setup the clear. */
+        if (r300->cmask_access) {
+            /* Pair the resource with the CMASK to avoid other resources
+             * accessing it. */
+            if (!r300->screen->cmask_resource) {
+                pipe_mutex_lock(r300->screen->cmask_mutex);
+                /* Double checking (first unlocked, then locked). */
+                if (!r300->screen->cmask_resource) {
+                    /* Don't reference this, so that the texture can be
+                     * destroyed while set in cmask_resource.
+                     * Then in texture_destroy, we set cmask_resource to NULL. */
+                    r300->screen->cmask_resource = fb->cbufs[0]->texture;
+                }
+                pipe_mutex_unlock(r300->screen->cmask_mutex);
+            }
+
+            if (r300->screen->cmask_resource == fb->cbufs[0]->texture) {
+                r300_set_clear_color(r300, color);
+                r300_mark_atom_dirty(r300, &r300->cmask_clear);
+                r300_mark_atom_dirty(r300, &r300->gpu_flush);
+                buffers &= ~PIPE_CLEAR_COLOR;
+            }
+        }
+    }
     /* Enable CBZB clear. */
-    if (r300_cbzb_clear_allowed(r300, buffers)) {
+    else if (r300_cbzb_clear_allowed(r300, buffers)) {
         struct r300_surface *surf = r300_surface(fb->cbufs[0]);
 
         hyperz->zb_depthclearvalue =
@@ -307,13 +371,17 @@ static void r300_clear(struct pipe_context* pipe,
                            fb->nr_cbufs,
                            buffers, cformat, color, depth, stencil);
         r300_blitter_end(r300);
-    } else if (r300->zmask_clear.dirty || r300->hiz_clear.dirty) {
+    } else if (r300->zmask_clear.dirty ||
+               r300->hiz_clear.dirty ||
+               r300->cmask_clear.dirty) {
         /* Just clear zmask and hiz now, this does not use the standard draw
          * procedure. */
         /* Calculate zmask_clear and hiz_clear atom sizes. */
         unsigned dwords =
+            r300->gpu_flush.size +
             (r300->zmask_clear.dirty ? r300->zmask_clear.size : 0) +
             (r300->hiz_clear.dirty ? r300->hiz_clear.size : 0) +
+            (r300->cmask_clear.dirty ? r300->cmask_clear.size : 0) +
             r300_get_num_cs_end_dwords(r300);
 
         /* Reserve CS space. */
@@ -322,6 +390,9 @@ static void r300_clear(struct pipe_context* pipe,
         }
 
         /* Emit clear packets. */
+        r300_emit_gpu_flush(r300, r300->gpu_flush.size, r300->gpu_flush.state);
+        r300->gpu_flush.dirty = FALSE;
+
         if (r300->zmask_clear.dirty) {
             r300_emit_zmask_clear(r300, r300->zmask_clear.size,
                                   r300->zmask_clear.state);
@@ -331,6 +402,11 @@ static void r300_clear(struct pipe_context* pipe,
             r300_emit_hiz_clear(r300, r300->hiz_clear.size,
                                 r300->hiz_clear.state);
             r300->hiz_clear.dirty = FALSE;
+        }
+        if (r300->cmask_clear.dirty) {
+            r300_emit_cmask_clear(r300, r300->cmask_clear.size,
+                                  r300->cmask_clear.state);
+            r300->cmask_clear.dirty = FALSE;
         }
     } else {
         assert(0);
@@ -621,7 +697,9 @@ static boolean r300_is_simple_msaa_resolve(const struct pipe_blit_info *info)
            info->src.box.x == 0 &&
            info->src.box.y == 0 &&
            info->src.box.width == dst_width &&
-           info->src.box.height == dst_height;
+           info->src.box.height == dst_height &&
+           (r300_resource(info->dst.resource)->tex.microtile != RADEON_LAYOUT_LINEAR ||
+            r300_resource(info->dst.resource)->tex.macrotile[info->dst.level] != RADEON_LAYOUT_LINEAR);
 }
 
 static void r300_simple_msaa_resolve(struct pipe_context *pipe,
@@ -699,6 +777,7 @@ static void r300_msaa_resolve(struct pipe_context *pipe,
     templ.depth0 = 1;
     templ.array_size = 1;
     templ.usage = PIPE_USAGE_STATIC;
+    templ.flags = R300_RESOURCE_FORCE_MICROTILING;
 
     tmp = screen->resource_create(screen, &templ);
 

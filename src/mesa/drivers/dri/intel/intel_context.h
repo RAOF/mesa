@@ -444,6 +444,7 @@ extern int INTEL_DEBUG;
 #define DEBUG_CLIP      0x2000000
 #define DEBUG_AUB       0x4000000
 #define DEBUG_SHADER_TIME 0x8000000
+#define DEBUG_NO16      0x20000000
 
 #ifdef HAVE_ANDROID_PLATFORM
 #define LOG_TAG "INTEL-MESA"
@@ -501,11 +502,14 @@ extern int INTEL_DEBUG;
  */
 
 extern bool intelInitContext(struct intel_context *intel,
-				  int api,
-                                  const struct gl_config * mesaVis,
-                                  __DRIcontext * driContextPriv,
-                                  void *sharedContextPrivate,
-                                  struct dd_function_table *functions);
+                             int api,
+                             unsigned major_version,
+                             unsigned minor_version,
+                             const struct gl_config * mesaVis,
+                             __DRIcontext * driContextPriv,
+                             void *sharedContextPrivate,
+                             struct dd_function_table *functions,
+                             unsigned *dri_ctx_error);
 
 extern void intelFinish(struct gl_context * ctx);
 extern void intel_flush_rendering_to_batch(struct gl_context *ctx);

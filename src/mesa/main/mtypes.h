@@ -1634,9 +1634,20 @@ struct gl_array_attrib
    GLuint LockFirst;            /**< GL_EXT_compiled_vertex_array */
    GLuint LockCount;            /**< GL_EXT_compiled_vertex_array */
 
-   /** GL 3.1 (slightly different from GL_NV_primitive_restart) */
+   /**
+    * \name Primitive restart controls
+    *
+    * Primitive restart is enabled if either \c PrimitiveRestart or
+    * \c PrimitiveRestart is set.  If \c PrimitiveRestart is set, then
+    * \c RestartIndex is used as the cut vertex.  Otherwise ~0 is used.
+    */
+   /*@{*/
    GLboolean PrimitiveRestart;
+   GLboolean PrimitiveRestartFixedIndex;
+   GLboolean _PrimitiveRestart;
    GLuint RestartIndex;
+   GLuint _RestartIndex;
+   /*@}*/
 
    /* GL_ARB_vertex_buffer_object */
    struct gl_buffer_object *ArrayBufferObj;
@@ -2262,10 +2273,28 @@ typedef enum
 struct gl_uniform_buffer_variable
 {
    char *Name;
+
+   /**
+    * Name of the uniform as seen by glGetUniformIndices.
+    *
+    * glGetUniformIndices requires that the block instance index \b not be
+    * present in the name of queried uniforms.
+    *
+    * \note
+    * \c gl_uniform_buffer_variable::IndexName and
+    * \c gl_uniform_buffer_variable::Name may point to identical storage.
+    */
+   char *IndexName;
+
    const struct glsl_type *Type;
-   unsigned int Buffer;
    unsigned int Offset;
    GLboolean RowMajor;
+};
+
+enum gl_uniform_block_packing {
+   ubo_packing_std140,
+   ubo_packing_shared,
+   ubo_packing_packed
 };
 
 struct gl_uniform_block
@@ -2289,6 +2318,14 @@ struct gl_uniform_block
     * (GL_UNIFORM_BLOCK_DATA_SIZE).
     */
    GLuint UniformBufferSize;
+
+   /**
+    * Layout specified in the shader
+    *
+    * This isn't accessible through the API, but it is used while
+    * cross-validating uniform blocks.
+    */
+   enum gl_uniform_block_packing _Packing;
 };
 
 /**
@@ -2301,6 +2338,11 @@ struct gl_shader_program
    GLuint Name;  /**< aka handle or ID */
    GLint RefCount;  /**< Reference count */
    GLboolean DeletePending;
+
+   /**
+    * Is the application intending to glGetProgramBinary this program?
+    */
+   GLboolean BinaryRetreivableHint;
 
    /**
     * Flags that the linker should not reject the program if it lacks
@@ -2507,6 +2549,7 @@ struct gl_query_object
    GLuint64EXT Result; /**< the counter */
    GLboolean Active;   /**< inside Begin/EndQuery */
    GLboolean Ready;    /**< result is ready? */
+   GLboolean EverBound;/**< has query object ever been bound */
 };
 
 
@@ -2962,6 +3005,23 @@ struct gl_constants
     * Drivers that support transform feedback must set this value to GL_FALSE.
     */
    GLboolean DisableVaryingPacking;
+
+   /*
+    * Maximum value supported for an index in DrawElements and friends.
+    *
+    * This must be at least (1ull<<24)-1.  The default value is
+    * (1ull<<32)-1.
+    *
+    * \since ES 3.0 or GL_ARB_ES3_compatibility
+    * \sa _mesa_init_constants
+    */
+   GLuint64 MaxElementIndex;
+
+   /**
+    * Disable interpretation of line continuations (lines ending with a
+    * backslash character ('\') in GLSL source.
+    */
+   GLboolean DisableGLSLLineContinuations;
 };
 
 
@@ -2997,6 +3057,7 @@ struct gl_extensions
    GLboolean ARB_half_float_pixel;
    GLboolean ARB_half_float_vertex;
    GLboolean ARB_instanced_arrays;
+   GLboolean ARB_internalformat_query;
    GLboolean ARB_map_buffer_alignment;
    GLboolean ARB_map_buffer_range;
    GLboolean ARB_occlusion_query;
@@ -3008,6 +3069,7 @@ struct gl_extensions
    GLboolean ARB_shader_stencil_export;
    GLboolean ARB_shader_texture_lod;
    GLboolean ARB_shading_language_100;
+   GLboolean ARB_shading_language_packing;
    GLboolean ARB_shadow;
    GLboolean ARB_sync;
    GLboolean ARB_texture_border_clamp;
@@ -3096,9 +3158,9 @@ struct gl_extensions
    GLboolean NV_texture_env_combine4;
    GLboolean NV_texture_rectangle;
    GLboolean TDFX_texture_compression_FXT1;
-   GLboolean S3_s3tc;
    GLboolean OES_EGL_image;
    GLboolean OES_draw_texture;
+   GLboolean OES_depth_texture_cube_map;
    GLboolean OES_EGL_image_external;
    GLboolean OES_compressed_ETC1_RGB8_texture;
    GLboolean extension_sentinel;
@@ -3358,6 +3420,7 @@ typedef enum
    API_OPENGLES,
    API_OPENGLES2,
    API_OPENGL_CORE,
+   API_OPENGL_LAST = API_OPENGL_CORE,
 } gl_api;
 
 /**
@@ -3404,9 +3467,28 @@ struct gl_context
    /** \name API function pointer tables */
    /*@{*/
    gl_api API;
-   struct _glapi_table *Save;	/**< Display list save functions */
-   struct _glapi_table *Exec;	/**< Execute functions */
-   struct _glapi_table *CurrentDispatch;  /**< == Save or Exec !! */
+   /**
+    * The current dispatch table for non-displaylist-saving execution, either
+    * BeginEnd or OutsideBeginEnd
+    */
+   struct _glapi_table *Exec;
+   /**
+    * The normal dispatch table for non-displaylist-saving, non-begin/end
+    */
+   struct _glapi_table *OutsideBeginEnd;
+   /** The dispatch table used between glNewList() and glEndList() */
+   struct _glapi_table *Save;
+   /**
+    * The dispatch table used between glBegin() and glEnd() (outside of a
+    * display list).  Only valid functions between those two are set, which is
+    * mostly just the set in a GLvertexformat struct.
+    */
+   struct _glapi_table *BeginEnd;
+   /**
+    * Tracks the current dispatch table out of the 3 above, so that it can be
+    * re-set on glXMakeCurrent().
+    */
+   struct _glapi_table *CurrentDispatch;
    /*@}*/
 
    struct gl_config Visual;

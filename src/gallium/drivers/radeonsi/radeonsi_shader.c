@@ -478,6 +478,13 @@ static void si_llvm_init_export_args(struct lp_build_tgsi_context *bld_base,
 		if (cbuf >= 0 && cbuf < 8) {
 			struct r600_context *rctx = si_shader_ctx->rctx;
 			compressed = (si_shader_ctx->key.export_16bpc >> cbuf) & 0x1;
+
+			if (compressed)
+				si_shader_ctx->shader->spi_shader_col_format |=
+					V_028714_SPI_SHADER_FP16_ABGR << (4 * cbuf);
+			else
+				si_shader_ctx->shader->spi_shader_col_format |=
+					V_028714_SPI_SHADER_32_ABGR << (4 * cbuf);
 		}
 	}
 
@@ -759,6 +766,9 @@ static void si_llvm_emit_epilogue(struct lp_build_tgsi_context * bld_base)
 		last_args[6]= uint->zero;
 		last_args[7]= uint->zero;
 		last_args[8]= uint->zero;
+
+		si_shader_ctx->shader->spi_shader_col_format |=
+			V_028714_SPI_SHADER_32_ABGR;
 	}
 
 	/* Specify whether the EXEC mask represents the valid mask */
@@ -845,12 +855,10 @@ static void tex_fetch_args(
 						ptr, offset);
 
 	/* Dimensions */
-	/* XXX: We might want to pass this information to the shader at some. */
-/*	emit_data->args[4] = lp_build_const_int32(bld_base->base.gallivm,
+	emit_data->args[4] = lp_build_const_int32(bld_base->base.gallivm,
 					emit_data->inst->Texture.Texture);
-*/
 
-	emit_data->arg_count = 4;
+	emit_data->arg_count = 5;
 	/* XXX: To optimize, we could use a float or v2f32, if the last bits of
 	 * the writemask are clear */
 	emit_data->dst_type = LLVMVectorType(
@@ -905,6 +913,11 @@ int si_pipe_shader_create(
 	bld_base = &si_shader_ctx.radeon_bld.soa.bld_base;
 
 	tgsi_scan_shader(sel->tokens, &shader_info);
+	if (shader_info.indirect_files != 0) {
+		fprintf(stderr, "Indirect addressing not fully handled yet\n");
+		return -ENOSYS;
+	}
+
 	shader->shader.uses_kill = shader_info.uses_kill;
 	bld_base->info = &shader_info;
 	bld_base->emit_fetch_funcs[TGSI_FILE_CONSTANT] = fetch_constant;

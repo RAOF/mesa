@@ -642,7 +642,6 @@ _mesa_TexParameterf(GLenum target, GLenum pname, GLfloat param)
    GLboolean need_update;
    struct gl_texture_object *texObj;
    GET_CURRENT_CONTEXT(ctx);
-   ASSERT_OUTSIDE_BEGIN_END(ctx);
 
    texObj = get_texobj(ctx, target, GL_FALSE);
    if (!texObj)
@@ -662,21 +661,16 @@ _mesa_TexParameterf(GLenum target, GLenum pname, GLfloat param)
    case GL_DEPTH_TEXTURE_MODE_ARB:
    case GL_TEXTURE_SRGB_DECODE_EXT:
    case GL_TEXTURE_CUBE_MAP_SEAMLESS:
-      {
-         /* convert float param to int */
-         GLint p[4];
-         p[0] = (GLint) param;
-         p[1] = p[2] = p[3] = 0;
-         need_update = set_tex_parameteri(ctx, texObj, pname, p);
-      }
-      break;
    case GL_TEXTURE_SWIZZLE_R_EXT:
    case GL_TEXTURE_SWIZZLE_G_EXT:
    case GL_TEXTURE_SWIZZLE_B_EXT:
    case GL_TEXTURE_SWIZZLE_A_EXT:
       {
          GLint p[4];
-         p[0] = (GLint) param;
+         p[0] = (param > 0) ?
+                ((param > INT_MAX) ? INT_MAX : (GLint) (param + 0.5)) :
+                ((param < INT_MIN) ? INT_MIN : (GLint) (param - 0.5));
+
          p[1] = p[2] = p[3] = 0;
          need_update = set_tex_parameteri(ctx, texObj, pname, p);
       }
@@ -703,7 +697,6 @@ _mesa_TexParameterfv(GLenum target, GLenum pname, const GLfloat *params)
    GLboolean need_update;
    struct gl_texture_object *texObj;
    GET_CURRENT_CONTEXT(ctx);
-   ASSERT_OUTSIDE_BEGIN_END(ctx);
 
    texObj = get_texobj(ctx, target, GL_FALSE);
    if (!texObj)
@@ -775,7 +768,6 @@ _mesa_TexParameteri(GLenum target, GLenum pname, GLint param)
    GLboolean need_update;
    struct gl_texture_object *texObj;
    GET_CURRENT_CONTEXT(ctx);
-   ASSERT_OUTSIDE_BEGIN_END(ctx);
 
    texObj = get_texobj(ctx, target, GL_FALSE);
    if (!texObj)
@@ -819,7 +811,6 @@ _mesa_TexParameteriv(GLenum target, GLenum pname, const GLint *params)
    GLboolean need_update;
    struct gl_texture_object *texObj;
    GET_CURRENT_CONTEXT(ctx);
-   ASSERT_OUTSIDE_BEGIN_END(ctx);
 
    texObj = get_texobj(ctx, target, GL_FALSE);
    if (!texObj)
@@ -880,7 +871,6 @@ _mesa_TexParameterIiv(GLenum target, GLenum pname, const GLint *params)
 {
    struct gl_texture_object *texObj;
    GET_CURRENT_CONTEXT(ctx);
-   ASSERT_OUTSIDE_BEGIN_END(ctx);
 
    texObj = get_texobj(ctx, target, GL_FALSE);
    if (!texObj)
@@ -910,7 +900,6 @@ _mesa_TexParameterIuiv(GLenum target, GLenum pname, const GLuint *params)
 {
    struct gl_texture_object *texObj;
    GET_CURRENT_CONTEXT(ctx);
-   ASSERT_OUTSIDE_BEGIN_END(ctx);
 
    texObj = get_texobj(ctx, target, GL_FALSE);
    if (!texObj)
@@ -1247,7 +1236,6 @@ _mesa_GetTexLevelParameteriv( GLenum target, GLint level,
    struct gl_texture_object *texObj;
    GLint maxLevels;
    GET_CURRENT_CONTEXT(ctx);
-   ASSERT_OUTSIDE_BEGIN_END(ctx);
 
    if (ctx->Texture.CurrentUnit >= ctx->Const.MaxCombinedTextureImageUnits) {
       _mesa_error(ctx, GL_INVALID_OPERATION,
@@ -1285,7 +1273,6 @@ _mesa_GetTexParameterfv( GLenum target, GLenum pname, GLfloat *params )
 {
    struct gl_texture_object *obj;
    GET_CURRENT_CONTEXT(ctx);
-   ASSERT_OUTSIDE_BEGIN_END(ctx);
 
    obj = get_texobj(ctx, target, GL_TRUE);
    if (!obj)
@@ -1401,10 +1388,10 @@ _mesa_GetTexParameterfv( GLenum target, GLenum pname, GLfloat *params )
          if (ctx->API != API_OPENGLES || !ctx->Extensions.OES_draw_texture)
             goto invalid_pname;
 
-         params[0] = obj->CropRect[0];
-         params[1] = obj->CropRect[1];
-         params[2] = obj->CropRect[2];
-         params[3] = obj->CropRect[3];
+         params[0] = (GLfloat) obj->CropRect[0];
+         params[1] = (GLfloat) obj->CropRect[1];
+         params[2] = (GLfloat) obj->CropRect[2];
+         params[3] = (GLfloat) obj->CropRect[3];
          break;
 
       case GL_TEXTURE_SWIZZLE_R_EXT:
@@ -1470,7 +1457,6 @@ _mesa_GetTexParameteriv( GLenum target, GLenum pname, GLint *params )
 {
    struct gl_texture_object *obj;
    GET_CURRENT_CONTEXT(ctx);
-   ASSERT_OUTSIDE_BEGIN_END(ctx);
 
    obj = get_texobj(ctx, target, GL_TRUE);
    if (!obj)
@@ -1649,7 +1635,6 @@ _mesa_GetTexParameterIiv(GLenum target, GLenum pname, GLint *params)
 {
    struct gl_texture_object *texObj;
    GET_CURRENT_CONTEXT(ctx);
-   ASSERT_OUTSIDE_BEGIN_END(ctx);
 
    texObj = get_texobj(ctx, target, GL_TRUE);
    if (!texObj)
@@ -1671,7 +1656,6 @@ _mesa_GetTexParameterIuiv(GLenum target, GLenum pname, GLuint *params)
 {
    struct gl_texture_object *texObj;
    GET_CURRENT_CONTEXT(ctx);
-   ASSERT_OUTSIDE_BEGIN_END(ctx);
 
    texObj = get_texobj(ctx, target, GL_TRUE);
    if (!texObj)

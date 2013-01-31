@@ -74,7 +74,9 @@ shading_language_version(struct gl_context *ctx)
       break;
 
    case API_OPENGLES2:
-      return (const GLubyte *) "OpenGL ES GLSL ES 1.0.16";
+      return (ctx->Version < 30)
+         ? (const GLubyte *) "OpenGL ES GLSL ES 1.0.16"
+         : (const GLubyte *) "OpenGL ES GLSL ES 3.0";
 
    case API_OPENGLES:
       /* fall-through */
@@ -195,7 +197,6 @@ _mesa_GetPointerv( GLenum pname, GLvoid **params )
 {
    GET_CURRENT_CONTEXT(ctx);
    const GLuint clientUnit = ctx->Array.ActiveTexture;
-   ASSERT_OUTSIDE_BEGIN_END(ctx);
 
    if (!params)
       return;

@@ -272,6 +272,8 @@ struct _mesa_glsl_parse_state {
    bool OES_standard_derivatives_warn;
    bool ARB_texture_cube_map_array_enable;
    bool ARB_texture_cube_map_array_warn;
+   bool ARB_shading_language_packing_enable;
+   bool ARB_shading_language_packing_warn;
    /*@}*/
 
    /** Extensions supported by the OpenGL implementation. */
@@ -354,7 +356,7 @@ extern "C" {
 #endif
 
 extern int glcpp_preprocess(void *ctx, const char **shader, char **info_log,
-                      const struct gl_extensions *extensions, int api);
+                      const struct gl_extensions *extensions, struct gl_context *gl_ctx);
 
 extern void _mesa_destroy_shader_compiler(void);
 extern void _mesa_destroy_shader_compiler_caches(void);

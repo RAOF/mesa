@@ -646,7 +646,7 @@ boolean r600_is_format_supported(struct pipe_screen *screen,
 
 static void r600_emit_polygon_offset(struct r600_context *rctx, struct r600_atom *a)
 {
-	struct radeon_winsys_cs *cs = rctx->cs;
+	struct radeon_winsys_cs *cs = rctx->rings.gfx.cs;
 	struct r600_poly_offset_state *state = (struct r600_poly_offset_state*)a;
 	float offset_units = state->offset_units;
 	float offset_scale = state->offset_scale;
@@ -976,6 +976,46 @@ static void *r600_create_sampler_state(struct pipe_context *ctx,
 	return ss;
 }
 
+static struct pipe_sampler_view *
+texture_buffer_sampler_view(struct r600_pipe_sampler_view *view,
+			    unsigned width0, unsigned height0)
+			    
+{
+	struct pipe_context *ctx = view->base.context;
+	struct r600_texture *tmp = (struct r600_texture*)view->base.texture;
+	uint64_t va;
+	int stride = util_format_get_blocksize(view->base.format);
+	unsigned format, num_format, format_comp, endian;
+
+	r600_vertex_data_type(view->base.format,
+			      &format, &num_format, &format_comp,
+			      &endian);
+
+	va = r600_resource_va(ctx->screen, view->base.texture);
+	view->tex_resource = &tmp->resource;
+
+	view->skip_mip_address_reloc = true;
+	view->tex_resource_words[0] = va;
+	view->tex_resource_words[1] = width0 - 1;
+	view->tex_resource_words[2] = S_038008_BASE_ADDRESS_HI(va >> 32UL) |
+		S_038008_STRIDE(stride) |
+		S_038008_DATA_FORMAT(format) |
+		S_038008_NUM_FORMAT_ALL(num_format) |
+		S_038008_FORMAT_COMP_ALL(format_comp) |
+		S_038008_SRF_MODE_ALL(1) |
+		S_038008_ENDIAN_SWAP(endian);
+	view->tex_resource_words[3] = 0;
+	/*
+	 * in theory dword 4 is for number of elements, for use with resinfo,
+	 * but it seems to utterly fail to work, the amd gpu shader analyser
+	 * uses a const buffer to store the element sizes for buffer txq
+	 */
+	view->tex_resource_words[4] = 0;
+	view->tex_resource_words[5] = 0;
+	view->tex_resource_words[6] = S_038018_TYPE(V_038010_SQ_TEX_VTX_VALID_BUFFER);
+	return &view->base;
+}
+
 struct pipe_sampler_view *
 r600_create_sampler_view_custom(struct pipe_context *ctx,
 				struct pipe_resource *texture,
@@ -999,6 +1039,9 @@ r600_create_sampler_view_custom(struct pipe_context *ctx,
 	view->base.texture = texture;
 	view->base.reference.count = 1;
 	view->base.context = ctx;
+
+	if (texture->target == PIPE_BUFFER)
+		return texture_buffer_sampler_view(view, texture->width0, 1);
 
 	swizzle[0] = state->swizzle_r;
 	swizzle[1] = state->swizzle_g;
@@ -1028,7 +1071,7 @@ r600_create_sampler_view_custom(struct pipe_context *ctx,
 	last_level = state->u.tex.last_level - offset_level;
 	width = width_first_level;
 	height = height_first_level;
-	depth = tmp->surface.level[offset_level].npix_z;
+        depth = u_minify(texture->depth0, offset_level);
 	pitch = tmp->surface.level[offset_level].nblk_x * util_format_get_blockwidth(state->format);
 
 	if (texture->target == PIPE_TEXTURE_1D_ARRAY) {
@@ -1092,16 +1135,14 @@ r600_create_sampler_view(struct pipe_context *ctx,
 			 struct pipe_resource *tex,
 			 const struct pipe_sampler_view *state)
 {
-	struct r600_texture *rtex = (struct r600_texture*)tex;
-
 	return r600_create_sampler_view_custom(ctx, tex, state,
-					       rtex->surface.level[state->u.tex.first_level].npix_x,
-					       rtex->surface.level[state->u.tex.first_level].npix_y);
+                                               u_minify(tex->width0, state->u.tex.first_level),
+                                               u_minify(tex->height0, state->u.tex.first_level));
 }
 
 static void r600_emit_clip_state(struct r600_context *rctx, struct r600_atom *atom)
 {
-	struct radeon_winsys_cs *cs = rctx->cs;
+	struct radeon_winsys_cs *cs = rctx->rings.gfx.cs;
 	struct pipe_clip_state *state = &rctx->clip_state.state;
 
 	r600_write_context_reg_seq(cs, R_028E20_PA_CL_UCP0_X, 6*4);
@@ -1115,7 +1156,7 @@ static void r600_set_polygon_stipple(struct pipe_context *ctx,
 
 static void r600_emit_scissor_state(struct r600_context *rctx, struct r600_atom *atom)
 {
-	struct radeon_winsys_cs *cs = rctx->cs;
+	struct radeon_winsys_cs *cs = rctx->rings.gfx.cs;
 	struct pipe_scissor_state *state = &rctx->scissor.scissor;
 
 	if (rctx->chip_class != R600 || rctx->scissor.enable) {
@@ -1443,7 +1484,7 @@ static void r600_init_depth_surface(struct r600_context *rctx,
 	surf->htile_enabled = 0;
 	/* use htile only for first level */
 	if (rtex->htile && !level) {
-		uint64_t va = r600_resource_va(rctx->screen, rtex->htile);
+		uint64_t va = r600_resource_va(&rctx->screen->screen, &rtex->htile->b.b);
 		surf->htile_enabled = 1;
 		surf->db_htile_data_base = va >> 8;
 		surf->db_htile_surface = S_028D24_HTILE_WIDTH(1) |
@@ -1612,7 +1653,7 @@ static void r600_emit_msaa_state(struct r600_context *rctx, int nr_samples)
 	};
 	static unsigned max_dist_8x = 7;
 
-	struct radeon_winsys_cs *cs = rctx->cs;
+	struct radeon_winsys_cs *cs = rctx->rings.gfx.cs;
 	unsigned max_dist = 0;
 
 	if (rctx->family == CHIP_R600) {
@@ -1679,7 +1720,7 @@ static void r600_emit_msaa_state(struct r600_context *rctx, int nr_samples)
 
 static void r600_emit_framebuffer_state(struct r600_context *rctx, struct r600_atom *atom)
 {
-	struct radeon_winsys_cs *cs = rctx->cs;
+	struct radeon_winsys_cs *cs = rctx->rings.gfx.cs;
 	struct pipe_framebuffer_state *state = &rctx->framebuffer.state;
 	unsigned nr_cbufs = state->nr_cbufs;
 	struct r600_surface **cb = (struct r600_surface**)&state->cbufs[0];
@@ -1709,6 +1750,7 @@ static void r600_emit_framebuffer_state(struct r600_context *rctx, struct r600_a
 		/* relocations */
 		for (i = 0; i < nr_cbufs; i++) {
 			unsigned reloc = r600_context_bo_reloc(rctx,
+							       &rctx->rings.gfx,
 							       (struct r600_resource*)cb[i]->base.texture,
 							       RADEON_USAGE_READWRITE);
 			r600_write_value(cs, PKT3(PKT3_NOP, 0, 0));
@@ -1738,6 +1780,7 @@ static void r600_emit_framebuffer_state(struct r600_context *rctx, struct r600_a
 		/* relocations */
 		for (i = 0; i < nr_cbufs; i++) {
 			unsigned reloc = r600_context_bo_reloc(rctx,
+							       &rctx->rings.gfx,
 							       cb[i]->cb_buffer_fmask,
 							       RADEON_USAGE_READWRITE);
 			r600_write_value(cs, PKT3(PKT3_NOP, 0, 0));
@@ -1752,6 +1795,7 @@ static void r600_emit_framebuffer_state(struct r600_context *rctx, struct r600_a
 		/* relocations */
 		for (i = 0; i < nr_cbufs; i++) {
 			unsigned reloc = r600_context_bo_reloc(rctx,
+							       &rctx->rings.gfx,
 							       cb[i]->cb_buffer_cmask,
 							       RADEON_USAGE_READWRITE);
 			r600_write_value(cs, PKT3(PKT3_NOP, 0, 0));
@@ -1772,6 +1816,7 @@ static void r600_emit_framebuffer_state(struct r600_context *rctx, struct r600_a
 	if (state->zsbuf) {
 		struct r600_surface *surf = (struct r600_surface*)state->zsbuf;
 		unsigned reloc = r600_context_bo_reloc(rctx,
+						       &rctx->rings.gfx,
 						       (struct r600_resource*)state->zsbuf->texture,
 						       RADEON_USAGE_READWRITE);
 
@@ -1826,7 +1871,7 @@ static void r600_emit_framebuffer_state(struct r600_context *rctx, struct r600_a
 
 static void r600_emit_cb_misc_state(struct r600_context *rctx, struct r600_atom *atom)
 {
-	struct radeon_winsys_cs *cs = rctx->cs;
+	struct radeon_winsys_cs *cs = rctx->rings.gfx.cs;
 	struct r600_cb_misc_state *a = (struct r600_cb_misc_state*)atom;
 
 	if (G_028808_SPECIAL_OP(a->cb_color_control) == V_028808_SPECIAL_RESOLVE_BOX) {
@@ -1856,7 +1901,7 @@ static void r600_emit_cb_misc_state(struct r600_context *rctx, struct r600_atom 
 
 static void r600_emit_db_state(struct r600_context *rctx, struct r600_atom *atom)
 {
-	struct radeon_winsys_cs *cs = rctx->cs;
+	struct radeon_winsys_cs *cs = rctx->rings.gfx.cs;
 	struct r600_db_state *a = (struct r600_db_state*)atom;
 
 	if (a->rsurf && a->rsurf->htile_enabled) {
@@ -1866,7 +1911,7 @@ static void r600_emit_db_state(struct r600_context *rctx, struct r600_atom *atom
 		r600_write_context_reg(cs, R_02802C_DB_DEPTH_CLEAR, fui(rtex->depth_clear));
 		r600_write_context_reg(cs, R_028D24_DB_HTILE_SURFACE, a->rsurf->db_htile_surface);
 		r600_write_context_reg(cs, R_028014_DB_HTILE_DATA_BASE, a->rsurf->db_htile_data_base);
-		reloc_idx = r600_context_bo_reloc(rctx, rtex->htile, RADEON_USAGE_READWRITE);
+		reloc_idx = r600_context_bo_reloc(rctx, &rctx->rings.gfx, rtex->htile, RADEON_USAGE_READWRITE);
 		cs->buf[cs->cdw++] = PKT3(PKT3_NOP, 0, 0);
 		cs->buf[cs->cdw++] = reloc_idx;
 	} else {
@@ -1876,7 +1921,7 @@ static void r600_emit_db_state(struct r600_context *rctx, struct r600_atom *atom
 
 static void r600_emit_db_misc_state(struct r600_context *rctx, struct r600_atom *atom)
 {
-	struct radeon_winsys_cs *cs = rctx->cs;
+	struct radeon_winsys_cs *cs = rctx->rings.gfx.cs;
 	struct r600_db_misc_state *a = (struct r600_db_misc_state*)atom;
 	unsigned db_render_control = 0;
 	unsigned db_render_override =
@@ -1919,7 +1964,7 @@ static void r600_emit_db_misc_state(struct r600_context *rctx, struct r600_atom 
 
 static void r600_emit_config_state(struct r600_context *rctx, struct r600_atom *atom)
 {
-	struct radeon_winsys_cs *cs = rctx->cs;
+	struct radeon_winsys_cs *cs = rctx->rings.gfx.cs;
 	struct r600_config_state *a = (struct r600_config_state*)atom;
 
 	r600_write_config_reg(cs, R_008C04_SQ_GPR_RESOURCE_MGMT_1, a->sq_gpr_resource_mgmt_1);
@@ -1927,7 +1972,7 @@ static void r600_emit_config_state(struct r600_context *rctx, struct r600_atom *
 
 static void r600_emit_vertex_buffers(struct r600_context *rctx, struct r600_atom *atom)
 {
-	struct radeon_winsys_cs *cs = rctx->cs;
+	struct radeon_winsys_cs *cs = rctx->rings.gfx.cs;
 	uint32_t dirty_mask = rctx->vertex_buffer_state.dirty_mask;
 
 	while (dirty_mask) {
@@ -1956,7 +2001,7 @@ static void r600_emit_vertex_buffers(struct r600_context *rctx, struct r600_atom
 		r600_write_value(cs, 0xc0000000); /* RESOURCEi_WORD6 */
 
 		r600_write_value(cs, PKT3(PKT3_NOP, 0, 0));
-		r600_write_value(cs, r600_context_bo_reloc(rctx, rbuffer, RADEON_USAGE_READ));
+		r600_write_value(cs, r600_context_bo_reloc(rctx, &rctx->rings.gfx, rbuffer, RADEON_USAGE_READ));
 	}
 }
 
@@ -1966,7 +2011,7 @@ static void r600_emit_constant_buffers(struct r600_context *rctx,
 				       unsigned reg_alu_constbuf_size,
 				       unsigned reg_alu_const_cache)
 {
-	struct radeon_winsys_cs *cs = rctx->cs;
+	struct radeon_winsys_cs *cs = rctx->rings.gfx.cs;
 	uint32_t dirty_mask = state->dirty_mask;
 
 	while (dirty_mask) {
@@ -1986,7 +2031,7 @@ static void r600_emit_constant_buffers(struct r600_context *rctx,
 		r600_write_context_reg(cs, reg_alu_const_cache + buffer_index * 4, offset >> 8);
 
 		r600_write_value(cs, PKT3(PKT3_NOP, 0, 0));
-		r600_write_value(cs, r600_context_bo_reloc(rctx, rbuffer, RADEON_USAGE_READ));
+		r600_write_value(cs, r600_context_bo_reloc(rctx, &rctx->rings.gfx, rbuffer, RADEON_USAGE_READ));
 
 		r600_write_value(cs, PKT3(PKT3_SET_RESOURCE, 7, 0));
 		r600_write_value(cs, (buffer_id_base + buffer_index) * 7);
@@ -2001,7 +2046,7 @@ static void r600_emit_constant_buffers(struct r600_context *rctx,
 		r600_write_value(cs, 0xc0000000); /* RESOURCEi_WORD6 */
 
 		r600_write_value(cs, PKT3(PKT3_NOP, 0, 0));
-		r600_write_value(cs, r600_context_bo_reloc(rctx, rbuffer, RADEON_USAGE_READ));
+		r600_write_value(cs, r600_context_bo_reloc(rctx, &rctx->rings.gfx, rbuffer, RADEON_USAGE_READ));
 
 		dirty_mask &= ~(1 << buffer_index);
 	}
@@ -2033,7 +2078,7 @@ static void r600_emit_sampler_views(struct r600_context *rctx,
 				    struct r600_samplerview_state *state,
 				    unsigned resource_id_base)
 {
-	struct radeon_winsys_cs *cs = rctx->cs;
+	struct radeon_winsys_cs *cs = rctx->rings.gfx.cs;
 	uint32_t dirty_mask = state->dirty_mask;
 
 	while (dirty_mask) {
@@ -2048,7 +2093,7 @@ static void r600_emit_sampler_views(struct r600_context *rctx,
 		r600_write_value(cs, (resource_id_base + resource_index) * 7);
 		r600_write_array(cs, 7, rview->tex_resource_words);
 
-		reloc = r600_context_bo_reloc(rctx, rview->tex_resource,
+		reloc = r600_context_bo_reloc(rctx, &rctx->rings.gfx, rview->tex_resource,
 					      RADEON_USAGE_READ);
 		r600_write_value(cs, PKT3(PKT3_NOP, 0, 0));
 		r600_write_value(cs, reloc);
@@ -2085,7 +2130,7 @@ static void r600_emit_sampler_states(struct r600_context *rctx,
 				unsigned resource_id_base,
 				unsigned border_color_reg)
 {
-	struct radeon_winsys_cs *cs = rctx->cs;
+	struct radeon_winsys_cs *cs = rctx->rings.gfx.cs;
 	uint32_t dirty_mask = texinfo->states.dirty_mask;
 
 	while (dirty_mask) {
@@ -2146,7 +2191,7 @@ static void r600_emit_ps_sampler_states(struct r600_context *rctx, struct r600_a
 
 static void r600_emit_seamless_cube_map(struct r600_context *rctx, struct r600_atom *atom)
 {
-	struct radeon_winsys_cs *cs = rctx->cs;
+	struct radeon_winsys_cs *cs = rctx->rings.gfx.cs;
 	unsigned tmp;
 
 	tmp = S_009508_DISABLE_CUBE_ANISO(1) |
@@ -2164,19 +2209,19 @@ static void r600_emit_sample_mask(struct r600_context *rctx, struct r600_atom *a
 	struct r600_sample_mask *s = (struct r600_sample_mask*)a;
 	uint8_t mask = s->sample_mask;
 
-	r600_write_context_reg(rctx->cs, R_028C48_PA_SC_AA_MASK,
+	r600_write_context_reg(rctx->rings.gfx.cs, R_028C48_PA_SC_AA_MASK,
 			       mask | (mask << 8) | (mask << 16) | (mask << 24));
 }
 
 static void r600_emit_vertex_fetch_shader(struct r600_context *rctx, struct r600_atom *a)
 {
-	struct radeon_winsys_cs *cs = rctx->cs;
+	struct radeon_winsys_cs *cs = rctx->rings.gfx.cs;
 	struct r600_cso_state *state = (struct r600_cso_state*)a;
 	struct r600_fetch_shader *shader = (struct r600_fetch_shader*)state->cso;
 
 	r600_write_context_reg(cs, R_028894_SQ_PGM_START_FS, shader->offset >> 8);
 	r600_write_value(cs, PKT3(PKT3_NOP, 0, 0));
-	r600_write_value(cs, r600_context_bo_reloc(rctx, shader->buffer, RADEON_USAGE_READ));
+	r600_write_value(cs, r600_context_bo_reloc(rctx, &rctx->rings.gfx, shader->buffer, RADEON_USAGE_READ));
 }
 
 void r600_init_state_functions(struct r600_context *rctx)
@@ -2899,4 +2944,194 @@ void r600_update_db_shader_control(struct r600_context * rctx)
 		rctx->db_misc_state.db_shader_control = db_shader_control;
 		rctx->db_misc_state.atom.dirty = true;
 	}
+}
+
+static INLINE unsigned r600_array_mode(unsigned mode)
+{
+	switch (mode) {
+	case RADEON_SURF_MODE_LINEAR_ALIGNED:	return V_0280A0_ARRAY_LINEAR_ALIGNED;
+		break;
+	case RADEON_SURF_MODE_1D:		return V_0280A0_ARRAY_1D_TILED_THIN1;
+		break;
+	case RADEON_SURF_MODE_2D:		return V_0280A0_ARRAY_2D_TILED_THIN1;
+	default:
+	case RADEON_SURF_MODE_LINEAR:		return V_0280A0_ARRAY_LINEAR_GENERAL;
+	}
+}
+
+static boolean r600_dma_copy_tile(struct r600_context *rctx,
+				struct pipe_resource *dst,
+				unsigned dst_level,
+				unsigned dst_x,
+				unsigned dst_y,
+				unsigned dst_z,
+				struct pipe_resource *src,
+				unsigned src_level,
+				unsigned src_x,
+				unsigned src_y,
+				unsigned src_z,
+				unsigned copy_height,
+				unsigned pitch,
+				unsigned bpp)
+{
+	struct radeon_winsys_cs *cs = rctx->rings.dma.cs;
+	struct r600_texture *rsrc = (struct r600_texture*)src;
+	struct r600_texture *rdst = (struct r600_texture*)dst;
+	unsigned array_mode, lbpp, pitch_tile_max, slice_tile_max, size;
+	unsigned ncopy, height, cheight, detile, i, x, y, z, src_mode, dst_mode;
+	uint64_t base, addr;
+
+	/* make sure that the dma ring is only one active */
+	rctx->rings.gfx.flush(rctx, RADEON_FLUSH_ASYNC);
+
+	dst_mode = rdst->surface.level[dst_level].mode;
+	src_mode = rsrc->surface.level[src_level].mode;
+	/* downcast linear aligned to linear to simplify test */
+	src_mode = src_mode == RADEON_SURF_MODE_LINEAR_ALIGNED ? RADEON_SURF_MODE_LINEAR : src_mode;
+	dst_mode = dst_mode == RADEON_SURF_MODE_LINEAR_ALIGNED ? RADEON_SURF_MODE_LINEAR : dst_mode;
+	assert(dst_mode != src_mode);
+
+	y = 0;
+	lbpp = util_logbase2(bpp);
+	pitch_tile_max = ((pitch / bpp) >> 3) - 1;
+
+	if (dst_mode == RADEON_SURF_MODE_LINEAR) {
+		/* T2L */
+		array_mode = r600_array_mode(src_mode);
+		slice_tile_max = (((pitch * rsrc->surface.level[src_level].npix_y) >> 6) / bpp) - 1;
+		/* linear height must be the same as the slice tile max height, it's ok even
+		 * if the linear destination/source have smaller heigh as the size of the
+		 * dma packet will be using the copy_height which is always smaller or equal
+		 * to the linear height
+		 */
+		height = rsrc->surface.level[src_level].npix_y;
+		detile = 1;
+		x = src_x;
+		y = src_y;
+		z = src_z;
+		base = rsrc->surface.level[src_level].offset;
+		addr = rdst->surface.level[dst_level].offset;
+		addr += rdst->surface.level[dst_level].slice_size * dst_z;
+		addr += dst_y * pitch + dst_x * bpp;
+	} else {
+		/* L2T */
+		array_mode = r600_array_mode(dst_mode);
+		slice_tile_max = (((pitch * rdst->surface.level[dst_level].npix_y) >> 6) / bpp) - 1;
+		/* linear height must be the same as the slice tile max height, it's ok even
+		 * if the linear destination/source have smaller heigh as the size of the
+		 * dma packet will be using the copy_height which is always smaller or equal
+		 * to the linear height
+		 */
+		height = rdst->surface.level[dst_level].npix_y;
+		detile = 0;
+		x = dst_x;
+		y = dst_y;
+		z = dst_z;
+		base = rdst->surface.level[dst_level].offset;
+		addr = rsrc->surface.level[src_level].offset;
+		addr += rsrc->surface.level[src_level].slice_size * src_z;
+		addr += src_y * pitch + src_x * bpp;
+	}
+	/* check that we are in dw/base alignment constraint */
+	if ((addr & 0x3) || (base & 0xff)) {
+		return FALSE;
+	}
+
+	size = (copy_height * pitch) >> 2;
+	ncopy = (size / 0x0000ffff) + !!(size % 0x0000ffff);
+	r600_need_dma_space(rctx, ncopy * 7);
+	for (i = 0; i < ncopy; i++) {
+		cheight = copy_height;
+		if (((cheight * pitch) >> 2) > 0x0000ffff) {
+			cheight = (0x0000ffff << 2) / pitch;
+		}
+		size = (cheight * pitch) >> 2;
+		/* emit reloc before writting cs so that cs is always in consistent state */
+		r600_context_bo_reloc(rctx, &rctx->rings.dma, &rsrc->resource, RADEON_USAGE_READ);
+		r600_context_bo_reloc(rctx, &rctx->rings.dma, &rdst->resource, RADEON_USAGE_WRITE);
+		cs->buf[cs->cdw++] = DMA_PACKET(DMA_PACKET_COPY, 1, 0, size);
+		cs->buf[cs->cdw++] = base >> 8;
+		cs->buf[cs->cdw++] = (detile << 31) | (array_mode << 27) |
+					(lbpp << 24) | ((height - 1) << 10) |
+					pitch_tile_max;
+		cs->buf[cs->cdw++] = (slice_tile_max << 12) | (z << 0);
+		cs->buf[cs->cdw++] = (x << 3) | (y << 17);
+		cs->buf[cs->cdw++] = addr & 0xfffffffc;
+		cs->buf[cs->cdw++] = (addr >> 32UL) & 0xff;
+		copy_height -= cheight;
+		addr += cheight * pitch;
+		y += cheight;
+	}
+	return TRUE;
+}
+
+boolean r600_dma_blit(struct pipe_context *ctx,
+			struct pipe_resource *dst,
+			unsigned dst_level,
+			unsigned dst_x, unsigned dst_y, unsigned dst_z,
+			struct pipe_resource *src,
+			unsigned src_level,
+			const struct pipe_box *src_box)
+{
+	struct r600_context *rctx = (struct r600_context *)ctx;
+	struct r600_texture *rsrc = (struct r600_texture*)src;
+	struct r600_texture *rdst = (struct r600_texture*)dst;
+	unsigned dst_pitch, src_pitch, bpp, dst_mode, src_mode, copy_height;
+	unsigned src_w, dst_w;
+
+	if (rctx->rings.dma.cs == NULL) {
+		return FALSE;
+	}
+	if (src->format != dst->format) {
+		return FALSE;
+	}
+
+	bpp = rdst->surface.bpe;
+	dst_pitch = rdst->surface.level[dst_level].pitch_bytes;
+	src_pitch = rsrc->surface.level[src_level].pitch_bytes;
+	src_w = rsrc->surface.level[src_level].npix_x;
+	dst_w = rdst->surface.level[dst_level].npix_x;
+	copy_height = src_box->height / rsrc->surface.blk_h;
+
+	dst_mode = rdst->surface.level[dst_level].mode;
+	src_mode = rsrc->surface.level[src_level].mode;
+	/* downcast linear aligned to linear to simplify test */
+	src_mode = src_mode == RADEON_SURF_MODE_LINEAR_ALIGNED ? RADEON_SURF_MODE_LINEAR : src_mode;
+	dst_mode = dst_mode == RADEON_SURF_MODE_LINEAR_ALIGNED ? RADEON_SURF_MODE_LINEAR : dst_mode;
+
+	if (src_pitch != dst_pitch || src_box->x || dst_x || src_w != dst_w) {
+		/* strick requirement on r6xx/r7xx */
+		return FALSE;
+	}
+	/* lot of constraint on alignment this should capture them all */
+	if ((src_pitch & 0x7) || (src_box->y & 0x7) || (dst_y & 0x7)) {
+		return FALSE;
+	}
+
+	if (src_mode == dst_mode) {
+		uint64_t dst_offset, src_offset, size;
+
+		/* simple dma blit would do NOTE code here assume :
+		 *   src_box.x/y == 0
+		 *   dst_x/y == 0
+		 *   dst_pitch == src_pitch
+		 */
+		src_offset= rsrc->surface.level[src_level].offset;
+		src_offset += rsrc->surface.level[src_level].slice_size * src_box->z;
+		src_offset += src_box->y * src_pitch + src_box->x * bpp;
+		dst_offset = rdst->surface.level[dst_level].offset;
+		dst_offset += rdst->surface.level[dst_level].slice_size * dst_z;
+		dst_offset += dst_y * dst_pitch + dst_x * bpp;
+		size = src_box->height * src_pitch;
+		/* must be dw aligned */
+		if ((dst_offset & 0x3) || (src_offset & 0x3) || (size & 0x3)) {
+			return FALSE;
+		}
+		r600_dma_copy(rctx, dst, src, dst_offset, src_offset, size);
+	} else {
+		return r600_dma_copy_tile(rctx, dst, dst_level, dst_x, dst_y, dst_z,
+					src, src_level, src_box->x, src_box->y, src_box->z,
+					copy_height, dst_pitch, bpp);
+	}
+	return TRUE;
 }

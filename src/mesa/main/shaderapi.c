@@ -583,6 +583,21 @@ get_programiv(struct gl_context *ctx, GLuint program, GLenum pname, GLint *param
 
       *params = shProg->NumUniformBlocks;
       return;
+   case GL_PROGRAM_BINARY_RETRIEVABLE_HINT:
+      /* This enum isn't part of the OES extension for OpenGL ES 2.0.  It is
+       * only available with desktop OpenGL 3.0+ with the
+       * GL_ARB_get_program_binary extension or OpenGL ES 3.0.
+       *
+       * On desktop, we ignore the 3.0+ requirement because it is silly.
+       */
+      if (!_mesa_is_desktop_gl(ctx) && !_mesa_is_gles3(ctx))
+         break;
+
+      *params = shProg->BinaryRetreivableHint;
+      return;
+   case GL_PROGRAM_BINARY_LENGTH:
+      *params = 0;
+      return;
    default:
       break;
    }
@@ -1385,8 +1400,6 @@ _mesa_UseProgram(GLhandleARB program)
    GET_CURRENT_CONTEXT(ctx);
    struct gl_shader_program *shProg;
 
-   ASSERT_OUTSIDE_BEGIN_END(ctx);
-
    if (_mesa_is_xfb_active_and_unpaused(ctx)) {
       _mesa_error(ctx, GL_INVALID_OPERATION,
                   "glUseProgram(transform feedback active)");
@@ -1500,14 +1513,63 @@ _mesa_ShaderBinary(GLint n, const GLuint* shaders, GLenum binaryformat,
 
 #endif /* FEATURE_ES2 */
 
-
 void GLAPIENTRY
-_mesa_ProgramParameteriARB(GLuint program, GLenum pname, GLint value)
+_mesa_GetProgramBinary(GLuint program, GLsizei bufSize, GLsizei *length,
+                       GLenum *binaryFormat, GLvoid *binary)
 {
    struct gl_shader_program *shProg;
    GET_CURRENT_CONTEXT(ctx);
 
-   ASSERT_OUTSIDE_BEGIN_END(ctx);
+   shProg = _mesa_lookup_shader_program_err(ctx, program, "glGetProgramBinary");
+   if (!shProg)
+      return;
+
+   if (!shProg->LinkStatus) {
+      _mesa_error(ctx, GL_INVALID_OPERATION,
+                  "glGetProgramBinary(program %u not linked)",
+                  shProg->Name);
+      return;
+   }
+
+   if (bufSize < 0){
+      _mesa_error(ctx, GL_INVALID_VALUE, "glGetProgramBinary(bufSize < 0)");
+      return;
+   }
+
+   /* The ARB_get_program_binary spec says:
+    *
+    *     "If <length> is NULL, then no length is returned."
+    */
+   if (length != NULL)
+      *length = 0;
+
+   (void) binaryFormat;
+   (void) binary;
+}
+
+void GLAPIENTRY
+_mesa_ProgramBinary(GLuint program, GLenum binaryFormat,
+                    const GLvoid *binary, GLsizei length)
+{
+   struct gl_shader_program *shProg;
+   GET_CURRENT_CONTEXT(ctx);
+
+   shProg = _mesa_lookup_shader_program_err(ctx, program, "glProgramBinary");
+   if (!shProg)
+      return;
+
+   (void) binaryFormat;
+   (void) binary;
+   (void) length;
+   _mesa_error(ctx, GL_INVALID_OPERATION, __FUNCTION__);
+}
+
+
+void GLAPIENTRY
+_mesa_ProgramParameteri(GLuint program, GLenum pname, GLint value)
+{
+   struct gl_shader_program *shProg;
+   GET_CURRENT_CONTEXT(ctx);
 
    shProg = _mesa_lookup_shader_program_err(ctx, program,
                                             "glProgramParameteri");
@@ -1516,6 +1578,9 @@ _mesa_ProgramParameteriARB(GLuint program, GLenum pname, GLint value)
 
    switch (pname) {
    case GL_GEOMETRY_VERTICES_OUT_ARB:
+      if (!_mesa_is_desktop_gl(ctx) || !ctx->Extensions.ARB_geometry_shader4)
+         break;
+
       if (value < 1 ||
           (unsigned) value > ctx->Const.MaxGeometryOutputVertices) {
          _mesa_error(ctx, GL_INVALID_VALUE,
@@ -1524,8 +1589,11 @@ _mesa_ProgramParameteriARB(GLuint program, GLenum pname, GLint value)
          return;
       }
       shProg->Geom.VerticesOut = value;
-      break;
+      return;
    case GL_GEOMETRY_INPUT_TYPE_ARB:
+      if (!_mesa_is_desktop_gl(ctx) || !ctx->Extensions.ARB_geometry_shader4)
+         break;
+
       switch (value) {
       case GL_POINTS:
       case GL_LINES:
@@ -1540,8 +1608,11 @@ _mesa_ProgramParameteriARB(GLuint program, GLenum pname, GLint value)
                      _mesa_lookup_enum_by_nr(value));
          return;
       }
-      break;
+      return;
    case GL_GEOMETRY_OUTPUT_TYPE_ARB:
+      if (!_mesa_is_desktop_gl(ctx) || !ctx->Extensions.ARB_geometry_shader4)
+         break;
+
       switch (value) {
       case GL_POINTS:
       case GL_LINE_STRIP:
@@ -1554,12 +1625,58 @@ _mesa_ProgramParameteriARB(GLuint program, GLenum pname, GLint value)
                      _mesa_lookup_enum_by_nr(value));
          return;
       }
-      break;
+      return;
+   case GL_PROGRAM_BINARY_RETRIEVABLE_HINT:
+      /* This enum isn't part of the OES extension for OpenGL ES 2.0, but it
+       * is part of OpenGL ES 3.0.  For the ES2 case, this function shouldn't
+       * even be in the dispatch table, so we shouldn't need to expclicitly
+       * check here.
+       *
+       * On desktop, we ignore the 3.0+ requirement because it is silly.
+       */
+
+      /* The ARB_get_program_binary extension spec says:
+       *
+       *     "An INVALID_VALUE error is generated if the <value> argument to
+       *     ProgramParameteri is not TRUE or FALSE."
+       */
+      if (value != GL_TRUE && value != GL_FALSE) {
+         _mesa_error(ctx, GL_INVALID_VALUE,
+                     "glProgramParameteri(pname=%s, value=%d): "
+                     "value must be 0 or 1.",
+                     _mesa_lookup_enum_by_nr(pname),
+                     value);
+         return;
+      }
+
+      /* No need to notify the driver.  Any changes will actually take effect
+       * the next time the shader is linked.
+       *
+       * The ARB_get_program_binary extension spec says:
+       *
+       *     "To indicate that a program binary is likely to be retrieved,
+       *     ProgramParameteri should be called with <pname>
+       *     PROGRAM_BINARY_RETRIEVABLE_HINT and <value> TRUE. This setting
+       *     will not be in effect until the next time LinkProgram or
+       *     ProgramBinary has been called successfully."
+       *
+       * The resloution of issue 9 in the extension spec also says:
+       *
+       *     "The application may use the PROGRAM_BINARY_RETRIEVABLE_HINT hint
+       *     to indicate to the GL implementation that this program will
+       *     likely be saved with GetProgramBinary at some point. This will
+       *     give the GL implementation the opportunity to track any state
+       *     changes made to the program before being saved such that when it
+       *     is loaded again a recompile can be avoided."
+       */
+      shProg->BinaryRetreivableHint = value;
+      return;
    default:
-      _mesa_error(ctx, GL_INVALID_ENUM, "glProgramParameteriARB(pname=%s)",
-                  _mesa_lookup_enum_by_nr(pname));
       break;
    }
+
+   _mesa_error(ctx, GL_INVALID_ENUM, "glProgramParameteri(pname=%s)",
+               _mesa_lookup_enum_by_nr(pname));
 }
 
 void
@@ -1581,8 +1698,6 @@ _mesa_UseShaderProgramEXT(GLenum type, GLuint program)
 {
    GET_CURRENT_CONTEXT(ctx);
    struct gl_shader_program *shProg = NULL;
-
-   ASSERT_OUTSIDE_BEGIN_END(ctx);
 
    if (!validate_shader_target(ctx, type)) {
       _mesa_error(ctx, GL_INVALID_ENUM, "glUseShaderProgramEXT(type)");
@@ -1674,84 +1789,3 @@ _mesa_CreateShaderProgramEXT(GLenum type, const GLchar *string)
 
    return program;
 }
-
-/**
- * Plug in shader-related functions into API dispatch table.
- */
-void
-_mesa_init_shader_dispatch(const struct gl_context *ctx,
-                           struct _glapi_table *exec)
-{
-#if FEATURE_GL
-   /* GL_ARB_vertex/fragment_shader */
-   if (_mesa_is_desktop_gl(ctx)) {
-      SET_DeleteObjectARB(exec, _mesa_DeleteObjectARB);
-      SET_GetHandleARB(exec, _mesa_GetHandleARB);
-      SET_DetachObjectARB(exec, _mesa_DetachObjectARB);
-      SET_CreateShaderObjectARB(exec, _mesa_CreateShaderObjectARB);
-      SET_CreateProgramObjectARB(exec, _mesa_CreateProgramObjectARB);
-      SET_AttachObjectARB(exec, _mesa_AttachObjectARB);
-      SET_GetObjectParameterfvARB(exec, _mesa_GetObjectParameterfvARB);
-      SET_GetObjectParameterivARB(exec, _mesa_GetObjectParameterivARB);
-      SET_GetInfoLogARB(exec, _mesa_GetInfoLogARB);
-      SET_GetAttachedObjectsARB(exec, _mesa_GetAttachedObjectsARB);
-   }
-
-   if (ctx->API != API_OPENGLES) {
-      SET_ShaderSource(exec, _mesa_ShaderSource);
-      SET_CompileShader(exec, _mesa_CompileShader);
-      SET_LinkProgram(exec, _mesa_LinkProgram);
-      SET_UseProgram(exec, _mesa_UseProgram);
-      SET_ValidateProgram(exec, _mesa_ValidateProgram);
-      SET_GetShaderSource(exec, _mesa_GetShaderSource);
-
-      /* OpenGL 2.0 */
-      SET_AttachShader(exec, _mesa_AttachShader);
-      SET_CreateProgram(exec, _mesa_CreateProgram);
-      SET_CreateShader(exec, _mesa_CreateShader);
-      SET_DeleteProgram(exec, _mesa_DeleteProgram);
-      SET_DeleteShader(exec, _mesa_DeleteShader);
-      SET_DetachShader(exec, _mesa_DetachShader);
-      SET_GetAttachedShaders(exec, _mesa_GetAttachedShaders);
-      SET_GetProgramiv(exec, _mesa_GetProgramiv);
-      SET_GetProgramInfoLog(exec, _mesa_GetProgramInfoLog);
-      SET_GetShaderiv(exec, _mesa_GetShaderiv);
-      SET_GetShaderInfoLog(exec, _mesa_GetShaderInfoLog);
-      SET_IsProgram(exec, _mesa_IsProgram);
-      SET_IsShader(exec, _mesa_IsShader);
-
-      /* GL_ARB_vertex_shader */
-      SET_BindAttribLocation(exec, _mesa_BindAttribLocation);
-      SET_GetActiveAttrib(exec, _mesa_GetActiveAttrib);
-      SET_GetAttribLocation(exec, _mesa_GetAttribLocation);
-   }
-
-   if (ctx->API == API_OPENGL_COMPAT) {
-      SET_UseShaderProgramEXT(exec, _mesa_UseShaderProgramEXT);
-      SET_ActiveProgramEXT(exec, _mesa_ActiveProgramEXT);
-      SET_CreateShaderProgramEXT(exec, _mesa_CreateShaderProgramEXT);
-   }
-
-   /* GL_EXT_gpu_shader4 / GL 3.0 */
-   if (_mesa_is_desktop_gl(ctx)) {
-      SET_BindFragDataLocation(exec, _mesa_BindFragDataLocation);
-   }
-   if (_mesa_is_desktop_gl(ctx) || _mesa_is_gles3(ctx)) {
-      SET_GetFragDataLocation(exec, _mesa_GetFragDataLocation);
-   }
-
-   /* GL_ARB_ES2_compatibility */
-   if (ctx->API != API_OPENGLES) {
-      SET_ReleaseShaderCompiler(exec, _mesa_ReleaseShaderCompiler);
-      SET_GetShaderPrecisionFormat(exec, _mesa_GetShaderPrecisionFormat);
-      SET_ShaderBinary(exec, _mesa_ShaderBinary);
-   }
-
-   /* GL_ARB_blend_func_extended */
-   if (_mesa_is_desktop_gl(ctx)) {
-      SET_BindFragDataLocationIndexed(exec, _mesa_BindFragDataLocationIndexed);
-      SET_GetFragDataIndex(exec, _mesa_GetFragDataIndex);
-   }
-#endif /* FEATURE_GL */
-}
-

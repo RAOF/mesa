@@ -423,7 +423,14 @@ dri_flush(__DRIcontext *cPriv,
       return;
    }
 
-   if (!drawable) {
+   if (drawable) {
+      /* prevent recursion */
+      if (drawable->flushing)
+         return;
+
+      drawable->flushing = TRUE;
+   }
+   else {
       flags &= ~__DRI2_FLUSH_DRAWABLE;
    }
 
@@ -446,6 +453,7 @@ dri_flush(__DRIcontext *cPriv,
 
    /* Flush the context and throttle if needed. */
    if (dri_screen(ctx->sPriv)->throttling_enabled &&
+       drawable &&
        (reason == __DRI2_THROTTLE_SWAPBUFFER ||
         reason == __DRI2_THROTTLE_FLUSHFRONT)) {
       /* Throttle.
@@ -458,24 +466,28 @@ dri_flush(__DRIcontext *cPriv,
        * pushes that fence on the queue. This requires that the st_context_iface
        * flush method returns a fence even if there are no commands to flush.
        */
-      struct dri_drawable *draw = dri_drawable(dPriv);
-      struct pipe_screen *screen = draw->screen->base.screen;
+      struct pipe_screen *screen = drawable->screen->base.screen;
       struct pipe_fence_handle *fence;
 
-      fence = swap_fences_pop_front(draw);
+      fence = swap_fences_pop_front(drawable);
       if (fence) {
          (void) screen->fence_finish(screen, fence, PIPE_TIMEOUT_INFINITE);
          screen->fence_reference(screen, &fence, NULL);
       }
 
       ctx->st->flush(ctx->st, flush_flags, &fence);
+
       if (fence) {
-         swap_fences_push_back(draw, fence);
+         swap_fences_push_back(drawable, fence);
          screen->fence_reference(screen, &fence, NULL);
       }
    }
    else if (flags & (__DRI2_FLUSH_DRAWABLE | __DRI2_FLUSH_CONTEXT)) {
       ctx->st->flush(ctx->st, flush_flags, NULL);
+   }
+
+   if (drawable) {
+      drawable->flushing = FALSE;
    }
 }
 

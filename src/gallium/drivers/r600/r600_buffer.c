@@ -27,6 +27,7 @@
 #include "r600_pipe.h"
 #include "util/u_upload_mgr.h"
 #include "util/u_memory.h"
+#include "util/u_surface.h"
 
 static void r600_buffer_destroy(struct pipe_screen *screen,
 				struct pipe_resource *buf)
@@ -85,11 +86,11 @@ static void *r600_buffer_get_transfer(struct pipe_context *ctx,
 }
 
 static void *r600_buffer_transfer_map(struct pipe_context *ctx,
-                                      struct pipe_resource *resource,
-                                      unsigned level,
-                                      unsigned usage,
-                                      const struct pipe_box *box,
-				      struct pipe_transfer **ptransfer)
+					struct pipe_resource *resource,
+					unsigned level,
+					unsigned usage,
+					const struct pipe_box *box,
+					struct pipe_transfer **ptransfer)
 {
 	struct r600_context *rctx = (struct r600_context*)ctx;
 	struct r600_resource *rbuffer = r600_resource(resource);
@@ -102,7 +103,7 @@ static void *r600_buffer_transfer_map(struct pipe_context *ctx,
 		assert(usage & PIPE_TRANSFER_WRITE);
 
 		/* Check if mapping this buffer would cause waiting for the GPU. */
-		if (rctx->ws->cs_is_buffer_referenced(rctx->cs, rbuffer->cs_buf, RADEON_USAGE_READWRITE) ||
+		if (r600_rings_is_buffer_referenced(rctx, rbuffer->cs_buf, RADEON_USAGE_READWRITE) ||
 		    rctx->ws->buffer_is_busy(rbuffer->buf, RADEON_USAGE_READWRITE)) {
 			unsigned i, mask;
 
@@ -144,7 +145,7 @@ static void *r600_buffer_transfer_map(struct pipe_context *ctx,
 		assert(usage & PIPE_TRANSFER_WRITE);
 
 		/* Check if mapping this buffer would cause waiting for the GPU. */
-		if (rctx->ws->cs_is_buffer_referenced(rctx->cs, rbuffer->cs_buf, RADEON_USAGE_READWRITE) ||
+		if (r600_rings_is_buffer_referenced(rctx, rbuffer->cs_buf, RADEON_USAGE_READWRITE) ||
 		    rctx->ws->buffer_is_busy(rbuffer->buf, RADEON_USAGE_READWRITE)) {
 			/* Do a wait-free write-only transfer using a temporary buffer. */
 			unsigned offset;
@@ -161,7 +162,8 @@ static void *r600_buffer_transfer_map(struct pipe_context *ctx,
 		}
 	}
 
-	data = rctx->ws->buffer_map(rbuffer->cs_buf, rctx->cs, usage);
+	/* mmap and synchronize with rings */
+	data = r600_buffer_mmap_sync_with_rings(rctx, rbuffer, usage);
 	if (!data) {
 		return NULL;
 	}
@@ -178,13 +180,27 @@ static void r600_buffer_transfer_unmap(struct pipe_context *pipe,
 	struct r600_transfer *rtransfer = (struct r600_transfer*)transfer;
 
 	if (rtransfer->staging) {
-		struct pipe_box box;
-		u_box_1d(rtransfer->offset + transfer->box.x % R600_MAP_BUFFER_ALIGNMENT,
-			 transfer->box.width, &box);
+		struct pipe_resource *dst, *src;
+		unsigned soffset, doffset, size;
 
+		dst = transfer->resource;
+		src = &rtransfer->staging->b.b;
+		size = transfer->box.width;
+		doffset = transfer->box.x;
+		soffset = rtransfer->offset + transfer->box.x % R600_MAP_BUFFER_ALIGNMENT;
 		/* Copy the staging buffer into the original one. */
-		r600_copy_buffer(pipe, transfer->resource, transfer->box.x,
-				 &rtransfer->staging->b.b, &box);
+		if (rctx->rings.dma.cs && !(size % 4) && !(doffset % 4) && !(soffset)) {
+			if (rctx->screen->chip_class >= EVERGREEN) {
+				evergreen_dma_copy(rctx, dst, src, doffset, soffset, size);
+			} else {
+				r600_dma_copy(rctx, dst, src, doffset, soffset, size);
+			}
+		} else {
+			struct pipe_box box;
+
+			u_box_1d(soffset, size, &box);
+			r600_copy_buffer(pipe, dst, doffset, src, &box);
+		}
 		pipe_resource_reference((struct pipe_resource**)&rtransfer->staging, NULL);
 	}
 	util_slab_free(&rctx->pool_transfers, transfer);

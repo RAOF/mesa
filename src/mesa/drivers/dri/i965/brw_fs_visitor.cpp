@@ -57,7 +57,7 @@ fs_visitor::visit(ir_variable *ir)
    if (variable_storage(ir))
       return;
 
-   if (ir->mode == ir_var_in) {
+   if (ir->mode == ir_var_shader_in) {
       if (!strcmp(ir->name, "gl_FragCoord")) {
 	 reg = emit_fragcoord_interpolation(ir);
       } else if (!strcmp(ir->name, "gl_FrontFacing")) {
@@ -68,7 +68,7 @@ fs_visitor::visit(ir_variable *ir)
       assert(reg);
       hash_table_insert(this->variable_ht, reg, ir);
       return;
-   } else if (ir->mode == ir_var_out) {
+   } else if (ir->mode == ir_var_shader_out) {
       reg = new(this->mem_ctx) fs_reg(this, ir->type);
 
       if (ir->index > 0) {
@@ -107,7 +107,7 @@ fs_visitor::visit(ir_variable *ir)
        * ir_binop_ubo_load expressions and not ir_dereference_variable for UBO
        * variables, so no need for them to be in variable_ht.
        */
-      if (ir->uniform_block != -1)
+      if (ir->is_in_uniform_block())
          return;
 
       if (dispatch_width == 16) {
@@ -506,8 +506,10 @@ fs_visitor::visit(ir_expression *ir)
       break;
 
    case ir_unop_f2b:
-   case ir_unop_i2b:
       emit(CMP(this->result, op[0], fs_reg(0.0f), BRW_CONDITIONAL_NZ));
+      break;
+   case ir_unop_i2b:
+      emit(CMP(this->result, op[0], fs_reg(0), BRW_CONDITIONAL_NZ));
       break;
 
    case ir_unop_trunc:
@@ -536,7 +538,24 @@ fs_visitor::visit(ir_expression *ir)
                   BRW_CONDITIONAL_L : BRW_CONDITIONAL_GE,
                   this->result, op[0], op[1]);
       break;
-
+   case ir_unop_pack_snorm_2x16:
+   case ir_unop_pack_snorm_4x8:
+   case ir_unop_pack_unorm_2x16:
+   case ir_unop_pack_unorm_4x8:
+   case ir_unop_unpack_snorm_2x16:
+   case ir_unop_unpack_snorm_4x8:
+   case ir_unop_unpack_unorm_2x16:
+   case ir_unop_unpack_unorm_4x8:
+   case ir_unop_unpack_half_2x16:
+   case ir_unop_pack_half_2x16:
+      assert(!"not reached: should be handled by lower_packing_builtins");
+      break;
+   case ir_unop_unpack_half_2x16_split_x:
+      emit(FS_OPCODE_UNPACK_HALF_2x16_SPLIT_X, this->result, op[0]);
+      break;
+   case ir_unop_unpack_half_2x16_split_y:
+      emit(FS_OPCODE_UNPACK_HALF_2x16_SPLIT_Y, this->result, op[0]);
+      break;
    case ir_binop_pow:
       emit_math(SHADER_OPCODE_POW, this->result, op[0], op[1]);
       break;
@@ -564,7 +583,9 @@ fs_visitor::visit(ir_expression *ir)
       else
 	 inst = emit(SHR(this->result, op[0], op[1]));
       break;
-
+   case ir_binop_pack_half_2x16_split:
+      emit(FS_OPCODE_PACK_HALF_2x16_SPLIT, this->result, op[0], op[1]);
+      break;
    case ir_binop_ubo_load:
       /* This IR node takes a constant uniform block and a constant or
        * variable byte offset within the block and loads a vector from that.
@@ -681,7 +702,9 @@ fs_visitor::emit_assignment_writes(fs_reg &l, fs_reg &r,
    case GLSL_TYPE_SAMPLER:
       break;
 
-   default:
+   case GLSL_TYPE_VOID:
+   case GLSL_TYPE_ERROR:
+   case GLSL_TYPE_INTERFACE:
       assert(!"not reached");
       break;
    }

@@ -170,10 +170,37 @@ void r600_flush_emit(struct r600_context *ctx);
 void r600_context_streamout_begin(struct r600_context *ctx);
 void r600_context_streamout_end(struct r600_context *ctx);
 void r600_need_cs_space(struct r600_context *ctx, unsigned num_dw, boolean count_draw_in);
+void r600_need_dma_space(struct r600_context *ctx, unsigned num_dw);
+void r600_dma_copy(struct r600_context *rctx,
+		struct pipe_resource *dst,
+		struct pipe_resource *src,
+		uint64_t dst_offset,
+		uint64_t src_offset,
+		uint64_t size);
+boolean r600_dma_blit(struct pipe_context *ctx,
+			struct pipe_resource *dst,
+			unsigned dst_level,
+			unsigned dst_x, unsigned dst_y, unsigned dst_z,
+			struct pipe_resource *src,
+			unsigned src_level,
+			const struct pipe_box *src_box);
+void evergreen_dma_copy(struct r600_context *rctx,
+		struct pipe_resource *dst,
+		struct pipe_resource *src,
+		uint64_t dst_offset,
+		uint64_t src_offset,
+		uint64_t size);
+boolean evergreen_dma_blit(struct pipe_context *ctx,
+			struct pipe_resource *dst,
+			unsigned dst_level,
+			unsigned dst_x, unsigned dst_y, unsigned dst_z,
+			struct pipe_resource *src,
+			unsigned src_level,
+			const struct pipe_box *src_box);
 void r600_context_block_emit_dirty(struct r600_context *ctx, struct r600_block *block, unsigned pkt_flags);
 void r600_cp_dma_copy_buffer(struct r600_context *rctx,
-			     struct pipe_resource *dst, unsigned dst_offset,
-			     struct pipe_resource *src, unsigned src_offset,
+			     struct pipe_resource *dst, uint64_t dst_offset,
+			     struct pipe_resource *src, uint64_t src_offset,
 			     unsigned size);
 
 int evergreen_context_init(struct r600_context *ctx);

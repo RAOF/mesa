@@ -30,6 +30,7 @@
   */
                    
 
+#include "main/context.h"
 #include "main/mtypes.h"
 #include "main/samplerobj.h"
 #include "program/prog_parameter.h"
@@ -365,7 +366,7 @@ brw_format_for_mesa_format(gl_format mesa_format)
 
       [MESA_FORMAT_RGBA_FLOAT32] = BRW_SURFACEFORMAT_R32G32B32A32_FLOAT,
       [MESA_FORMAT_RGBA_FLOAT16] = BRW_SURFACEFORMAT_R16G16B16A16_FLOAT,
-      [MESA_FORMAT_RGB_FLOAT32] = 0,
+      [MESA_FORMAT_RGB_FLOAT32] = BRW_SURFACEFORMAT_R32G32B32_FLOAT,
       [MESA_FORMAT_RGB_FLOAT16] = 0,
       [MESA_FORMAT_ALPHA_FLOAT32] = BRW_SURFACEFORMAT_A32_FLOAT,
       [MESA_FORMAT_ALPHA_FLOAT16] = BRW_SURFACEFORMAT_A16_FLOAT,
@@ -685,7 +686,8 @@ brw_get_surface_num_multisamples(unsigned num_samples)
  * swizzling.
  */
 int
-brw_get_texture_swizzle(const struct gl_texture_object *t)
+brw_get_texture_swizzle(const struct gl_context *ctx,
+                        const struct gl_texture_object *t)
 {
    const struct gl_texture_image *img = t->Image[0][t->BaseLevel];
 
@@ -701,7 +703,19 @@ brw_get_texture_swizzle(const struct gl_texture_object *t)
 
    if (img->_BaseFormat == GL_DEPTH_COMPONENT ||
        img->_BaseFormat == GL_DEPTH_STENCIL) {
-      switch (t->DepthMode) {
+      GLenum depth_mode = t->DepthMode;
+
+      /* In ES 3.0, DEPTH_TEXTURE_MODE is expected to be GL_RED for textures
+       * with depth component data specified with a sized internal format.
+       * Otherwise, it's left at the old default, GL_LUMINANCE.
+       */
+      if (_mesa_is_gles3(ctx) &&
+          img->InternalFormat != GL_DEPTH_COMPONENT &&
+          img->InternalFormat != GL_DEPTH_STENCIL) {
+         depth_mode = GL_RED;
+      }
+
+      switch (depth_mode) {
       case GL_ALPHA:
          swizzles[0] = SWIZZLE_ZERO;
          swizzles[1] = SWIZZLE_ZERO;
@@ -727,6 +741,25 @@ brw_get_texture_swizzle(const struct gl_texture_object *t)
          swizzles[3] = SWIZZLE_ONE;
          break;
       }
+   }
+
+   /* If the texture's format is alpha-only, force R, G, and B to
+    * 0.0. Similarly, if the texture's format has no alpha channel,
+    * force the alpha value read to 1.0. This allows for the
+    * implementation to use an RGBA texture for any of these formats
+    * without leaking any unexpected values.
+    */
+   switch (img->_BaseFormat) {
+   case GL_ALPHA:
+      swizzles[0] = SWIZZLE_ZERO;
+      swizzles[1] = SWIZZLE_ZERO;
+      swizzles[2] = SWIZZLE_ZERO;
+      break;
+   case GL_RED:
+   case GL_RG:
+   case GL_RGB:
+      swizzles[3] = SWIZZLE_ONE;
+      break;
    }
 
    return MAKE_SWIZZLE4(swizzles[GET_SWZ(t->_Swizzle, 0)],
@@ -832,7 +865,7 @@ brw_update_texture_surface(struct gl_context *ctx,
 
    surf[3] = (brw_get_surface_tiling_bits(intelObj->mt->region->tiling) |
 	      (depth - 1) << BRW_SURFACE_DEPTH_SHIFT |
-	      ((intelObj->mt->region->pitch * intelObj->mt->cpp) - 1) <<
+	      (intelObj->mt->region->pitch - 1) <<
 	      BRW_SURFACE_PITCH_SHIFT);
 
    surf[4] = 0;
@@ -1205,7 +1238,7 @@ brw_update_renderbuffer_surface(struct brw_context *brw,
 	      (rb->Height - 1) << BRW_SURFACE_HEIGHT_SHIFT);
 
    surf[3] = (brw_get_surface_tiling_bits(region->tiling) |
-	      ((region->pitch * region->cpp) - 1) << BRW_SURFACE_PITCH_SHIFT);
+	      (region->pitch - 1) << BRW_SURFACE_PITCH_SHIFT);
 
    surf[4] = brw_get_surface_num_multisamples(mt->num_samples);
 

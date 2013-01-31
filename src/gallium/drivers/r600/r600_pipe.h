@@ -39,13 +39,14 @@
 
 #define R600_TRACE_CS 0
 
-#define R600_MAX_USER_CONST_BUFFERS 1
-#define R600_MAX_DRIVER_CONST_BUFFERS 2
+#define R600_MAX_USER_CONST_BUFFERS 13
+#define R600_MAX_DRIVER_CONST_BUFFERS 3
 #define R600_MAX_CONST_BUFFERS (R600_MAX_USER_CONST_BUFFERS + R600_MAX_DRIVER_CONST_BUFFERS)
 
 /* start driver buffers after user buffers */
 #define R600_UCP_CONST_BUFFER (R600_MAX_USER_CONST_BUFFERS)
 #define R600_TXQ_CONST_BUFFER (R600_MAX_USER_CONST_BUFFERS + 1)
+#define R600_BUFFER_INFO_CONST_BUFFER (R600_MAX_USER_CONST_BUFFERS + 2)
 
 #define R600_MAX_CONST_BUFFER_SIZE 4096
 
@@ -219,6 +220,14 @@ enum r600_msaa_texture_mode {
 	MSAA_TEXTURE_COMPRESSED
 };
 
+typedef boolean (*r600g_dma_blit_t)(struct pipe_context *ctx,
+				struct pipe_resource *dst,
+				unsigned dst_level,
+				unsigned dst_x, unsigned dst_y, unsigned dst_z,
+				struct pipe_resource *src,
+				unsigned src_level,
+				const struct pipe_box *src_box);
+
 struct r600_screen {
 	struct pipe_screen		screen;
 	struct radeon_winsys		*ws;
@@ -242,6 +251,7 @@ struct r600_screen {
 	uint32_t			*trace_ptr;
 	unsigned			cs_count;
 #endif
+	r600g_dma_blit_t		dma_blit;
 };
 
 struct r600_pipe_sampler_view {
@@ -330,6 +340,7 @@ struct r600_samplerview_state {
 	uint32_t			compressed_depthtex_mask; /* which textures are depth */
 	uint32_t			compressed_colortex_mask;
 	boolean                         dirty_txq_constants;
+	boolean				dirty_buffer_constants;
 };
 
 struct r600_sampler_states {
@@ -347,6 +358,8 @@ struct r600_textures_info {
 
 	/* cube array txq workaround */
 	uint32_t			*txq_constants;
+	/* buffer related workarounds */
+	uint32_t			*buffer_constants;
 };
 
 struct r600_fence {
@@ -402,11 +415,22 @@ struct r600_fetch_shader {
 	unsigned			offset;
 };
 
+struct r600_ring {
+	struct radeon_winsys_cs		*cs;
+	bool				flushing;
+	void (*flush)(void *ctx, unsigned flags);
+};
+
+struct r600_rings {
+	struct r600_ring		gfx;
+	struct r600_ring		dma;
+};
+
 struct r600_context {
 	struct pipe_context		context;
 	struct r600_screen		*screen;
 	struct radeon_winsys		*ws;
-	struct radeon_winsys_cs		*cs;
+	struct r600_rings		rings;
 	struct blitter_context		*blitter;
 	struct u_upload_mgr		*uploader;
 	struct u_suballocator		*allocator_so_filled_size;
@@ -622,8 +646,12 @@ struct pipe_resource *r600_buffer_create(struct pipe_screen *screen,
 					 unsigned alignment);
 
 /* r600_pipe.c */
-void r600_flush(struct pipe_context *ctx, struct pipe_fence_handle **fence,
-		unsigned flags);
+boolean r600_rings_is_buffer_referenced(struct r600_context *ctx,
+					struct radeon_winsys_cs_handle *buf,
+					enum radeon_bo_usage usage);
+void *r600_buffer_mmap_sync_with_rings(struct r600_context *ctx,
+					struct r600_resource *resource,
+					unsigned usage);
 
 /* r600_query.c */
 void r600_init_query_functions(struct r600_context *rctx);
@@ -677,6 +705,10 @@ struct pipe_surface *r600_create_surface_custom(struct pipe_context *pipe,
 						struct pipe_resource *texture,
 						const struct pipe_surface *templ,
 						unsigned width, unsigned height);
+
+unsigned r600_get_swizzle_combined(const unsigned char *swizzle_format,
+				   const unsigned char *swizzle_view,
+				   boolean vtx);
 
 /* r600_state_common.c */
 void r600_init_common_state_functions(struct r600_context *rctx);
@@ -827,12 +859,27 @@ void r600_release_command_buffer(struct r600_command_buffer *cb);
 /*
  * Helpers for emitting state into a command stream directly.
  */
-
-static INLINE unsigned r600_context_bo_reloc(struct r600_context *ctx, struct r600_resource *rbo,
+static INLINE unsigned r600_context_bo_reloc(struct r600_context *ctx,
+					     struct r600_ring *ring,
+					     struct r600_resource *rbo,
 					     enum radeon_bo_usage usage)
 {
 	assert(usage);
-	return ctx->ws->cs_add_reloc(ctx->cs, rbo->cs_buf, usage, rbo->domains) * 4;
+	/* make sure that all previous ring use are flushed so everything
+	 * look serialized from driver pov
+	 */
+	if (!ring->flushing) {
+		if (ring == &ctx->rings.gfx) {
+			if (ctx->rings.dma.cs) {
+				/* flush dma ring */
+				ctx->rings.dma.flush(ctx, RADEON_FLUSH_ASYNC);
+			}
+		} else {
+			/* flush gfx ring */
+			ctx->rings.gfx.flush(ctx, RADEON_FLUSH_ASYNC);
+		}
+	}
+	return ctx->ws->cs_add_reloc(ring->cs, rbo->cs_buf, usage, rbo->domains) * 4;
 }
 
 static INLINE void r600_write_value(struct radeon_winsys_cs *cs, unsigned value)

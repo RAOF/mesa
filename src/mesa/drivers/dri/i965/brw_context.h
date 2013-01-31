@@ -715,8 +715,6 @@ struct brw_vertex_element {
 
    /** The corresponding Mesa vertex attribute */
    gl_vert_attrib attrib;
-   /** Size of a complete element */
-   GLuint element_size;
    /** Offset of the first element within the buffer object */
    unsigned int offset;
 };
@@ -1053,9 +1051,6 @@ struct brw_context
       int index;
       bool begin_emitted;
    } query;
-   /* Used to give every program string a unique id
-    */
-   GLuint program_id;
 
    int num_atoms;
    const struct brw_tracked_state **atoms;

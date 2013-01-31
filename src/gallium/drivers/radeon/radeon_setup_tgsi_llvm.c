@@ -125,7 +125,17 @@ emit_fetch_immediate(
 	}
 
 	struct lp_build_tgsi_soa_context *bld = lp_soa_context(bld_base);
-	return LLVMConstBitCast(bld->immediates[reg->Register.Index][swizzle], ctype);
+	if (swizzle == ~0) {
+		LLVMValueRef values[TGSI_NUM_CHANNELS] = {};
+		unsigned chan;
+		for (chan = 0; chan < TGSI_NUM_CHANNELS; chan++) {
+                   values[chan] = LLVMConstBitCast(bld->immediates[reg->Register.Index][chan], ctype);
+		}
+		return lp_build_gather_values(bld_base->base.gallivm, values,
+						TGSI_NUM_CHANNELS);
+	} else {
+		return LLVMConstBitCast(bld->immediates[reg->Register.Index][swizzle], ctype);
+	}
 }
 
 static LLVMValueRef
@@ -324,6 +334,10 @@ emit_store(
 		}
 
 		switch(reg->Register.File) {
+		case TGSI_FILE_ADDRESS:
+			temp_ptr = bld->addr[reg->Register.Index][chan_index];
+			LLVMBuildStore(builder, value, temp_ptr);
+			continue;
 		case TGSI_FILE_OUTPUT:
 			temp_ptr = bld->outputs[reg->Register.Index][chan_index];
 			break;
@@ -796,6 +810,17 @@ static void emit_not(
 	emit_data->output[emit_data->chan] = LLVMBuildNot(builder, v, "");
 }
 
+static void emit_arl(
+		const struct lp_build_tgsi_action * action,
+		struct lp_build_tgsi_context * bld_base,
+		struct lp_build_emit_data * emit_data)
+{
+	LLVMBuilderRef builder = bld_base->base.gallivm->builder;
+	LLVMValueRef floor_index =  lp_build_emit_llvm_unary(bld_base, TGSI_OPCODE_FLR, emit_data->args[0]);
+	emit_data->output[emit_data->chan] = LLVMBuildFPToSI(builder,
+			floor_index, bld_base->base.int_elem_type , "");
+}
+
 static void emit_and(
 		const struct lp_build_tgsi_action * action,
 		struct lp_build_tgsi_context * bld_base,
@@ -1115,8 +1140,7 @@ void radeon_llvm_context_init(struct radeon_llvm_context * ctx)
 
 	bld_base->op_actions[TGSI_OPCODE_ABS].emit = build_tgsi_intrinsic_readonly;
 	bld_base->op_actions[TGSI_OPCODE_ABS].intr_name = "fabs";
-	bld_base->op_actions[TGSI_OPCODE_ARL].emit = build_tgsi_intrinsic_nomem;
-	bld_base->op_actions[TGSI_OPCODE_ARL].intr_name = "llvm.AMDGPU.arl";
+	bld_base->op_actions[TGSI_OPCODE_ARL].emit = emit_arl;
 	bld_base->op_actions[TGSI_OPCODE_AND].emit = emit_and;
 	bld_base->op_actions[TGSI_OPCODE_BGNLOOP].emit = bgnloop_emit;
 	bld_base->op_actions[TGSI_OPCODE_BRK].emit = brk_emit;

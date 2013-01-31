@@ -80,6 +80,7 @@ PUBLIC const char __driConfigOptions[] =
      DRI_CONF_ALWAYS_FLUSH_BATCH(false)
      DRI_CONF_ALWAYS_FLUSH_CACHE(false)
      DRI_CONF_FORCE_GLSL_EXTENSIONS_WARN(false)
+     DRI_CONF_DISABLE_GLSL_LINE_CONTINUATIONS(false)
      DRI_CONF_DISABLE_BLEND_FUNC_EXTENDED(false)
 
       DRI_CONF_OPT_BEGIN(stub_occlusion_query, bool, false)
@@ -92,7 +93,7 @@ PUBLIC const char __driConfigOptions[] =
    DRI_CONF_SECTION_END
 DRI_CONF_END;
 
-const GLuint __driNConfigOptions = 15;
+const GLuint __driNConfigOptions = 16;
 
 #include "intel_batchbuffer.h"
 #include "intel_buffers.h"
@@ -144,14 +145,14 @@ aub_dump_bmp(struct gl_context *ctx)
 	    continue;
 	 }
 
+         assert(irb->mt->region->pitch % irb->mt->region->cpp == 0);
 	 drm_intel_gem_bo_aub_dump_bmp(irb->mt->region->bo,
 				       irb->draw_x,
 				       irb->draw_y,
 				       irb->Base.Base.Width,
 				       irb->Base.Base.Height,
 				       format,
-				       irb->mt->region->pitch *
-				       irb->mt->region->cpp,
+				       irb->mt->region->pitch,
 				       0);
       }
    }
@@ -413,7 +414,7 @@ intel_query_image(__DRIimage *image, int attrib, int *value)
 {
    switch (attrib) {
    case __DRI_IMAGE_ATTRIB_STRIDE:
-      *value = image->region->pitch * image->region->cpp;
+      *value = image->region->pitch;
       return true;
    case __DRI_IMAGE_ATTRIB_HANDLE:
       *value = image->region->bo->handle;
@@ -522,7 +523,7 @@ intel_create_image_from_names(__DRIscreen *screen,
 static __DRIimage *
 intel_from_planar(__DRIimage *parent, int plane, void *loaderPrivate)
 {
-    int width, height, offset, stride, dri_format, cpp, index, pitch;
+    int width, height, offset, stride, dri_format, index;
     struct intel_image_format *f;
     uint32_t mask_x, mask_y;
     __DRIimage *image;
@@ -543,9 +544,7 @@ intel_from_planar(__DRIimage *parent, int plane, void *loaderPrivate)
     stride = parent->strides[index];
 
     image = intel_allocate_image(dri_format, loaderPrivate);
-    cpp = _mesa_get_format_bytes(image->format); /* safe since no none format */
-    pitch = stride / cpp;
-    if (offset + height * cpp * pitch > parent->region->bo->size) {
+    if (offset + height * stride > parent->region->bo->size) {
        _mesa_warning(NULL, "intel_create_sub_image: subimage out of bounds");
        FREE(image);
        return NULL;
@@ -560,7 +559,7 @@ intel_from_planar(__DRIimage *parent, int plane, void *loaderPrivate)
     image->region->cpp = _mesa_get_format_bytes(image->format);
     image->region->width = width;
     image->region->height = height;
-    image->region->pitch = pitch;
+    image->region->pitch = stride;
     image->region->refcount = 1;
     image->region->bo = parent->region->bo;
     drm_intel_bo_reference(image->region->bo);
@@ -753,8 +752,12 @@ intelDestroyBuffer(__DRIdrawable * driDrawPriv)
  * functions.
  */
 extern bool
-i830CreateContext(const struct gl_config *mesaVis,
+i830CreateContext(int api,
+                  const struct gl_config *mesaVis,
 		  __DRIcontext *driContextPriv,
+		  unsigned major_version,
+		  unsigned minor_version,
+		  unsigned *error,
 		  void *sharedContextPrivate);
 
 extern bool
@@ -796,27 +799,10 @@ intelCreateContext(gl_api api,
                                   major_version, minor_version, error,
                                   sharedContextPrivate);
    } else {
-      switch (api) {
-      case API_OPENGL_COMPAT:
-         if (major_version > 1 || minor_version > 3) {
-            *error = __DRI_CTX_ERROR_BAD_VERSION;
-            success = false;
-         }
-         break;
-      case API_OPENGLES:
-         break;
-      default:
-         *error = __DRI_CTX_ERROR_BAD_API;
-         success = false;
-      }
-
-      if (success) {
-         intelScreen->no_vbo = true;
-         success = i830CreateContext(mesaVis, driContextPriv,
-                                     sharedContextPrivate);
-         if (!success)
-            *error = __DRI_CTX_ERROR_NO_MEMORY;
-      }
+      intelScreen->no_vbo = true;
+      success = i830CreateContext(api, mesaVis, driContextPriv,
+                                  major_version, minor_version, error,
+                                  sharedContextPrivate);
    }
 #else
    success = brwCreateContext(api, mesaVis,
@@ -918,9 +904,8 @@ intel_detect_swizzling(struct intel_screen *screen)
 static __DRIconfig**
 intel_screen_make_configs(__DRIscreen *dri_screen)
 {
-   static const gl_format formats[3] = {
+   static const gl_format formats[] = {
       MESA_FORMAT_RGB565,
-      MESA_FORMAT_XRGB8888,
       MESA_FORMAT_ARGB8888
    };
 
@@ -1050,6 +1035,77 @@ intel_screen_make_configs(__DRIscreen *dri_screen)
    return configs;
 }
 
+static void
+set_max_gl_versions(struct intel_screen *screen)
+{
+   switch (screen->gen) {
+   case 7:
+      if (screen->kernel_has_gen7_sol_reset) {
+         screen->max_gl_core_version = 31;
+         screen->max_gl_compat_version = 30;
+         screen->max_gl_es1_version = 11;
+         screen->max_gl_es2_version = 30;
+      } else {
+         screen->max_gl_core_version = 0;
+         screen->max_gl_compat_version = 21;
+         screen->max_gl_es1_version = 11;
+         screen->max_gl_es2_version = 20;
+      }
+      break;
+   case 6:
+      screen->max_gl_core_version = 31;
+      screen->max_gl_compat_version = 30;
+      screen->max_gl_es1_version = 11;
+      screen->max_gl_es2_version = 20;
+      break;
+   case 5:
+   case 4:
+      screen->max_gl_core_version = 0;
+      screen->max_gl_compat_version = 21;
+      screen->max_gl_es1_version = 11;
+      screen->max_gl_es2_version = 20;
+      break;
+   case 3: {
+      bool has_fragment_shader = driQueryOptionb(&screen->optionCache, "fragment_shader");
+      bool has_occlusion_query = driQueryOptionb(&screen->optionCache, "stub_occlusion_query");
+
+      screen->max_gl_core_version = 0;
+      screen->max_gl_es1_version = 11;
+
+      if (has_fragment_shader && has_occlusion_query) {
+         screen->max_gl_compat_version = 21;
+      } else {
+         screen->max_gl_compat_version = 14;
+      }
+
+      if (has_fragment_shader) {
+         screen->max_gl_es2_version = 20;
+      } else {
+         screen->max_gl_es2_version = 0;
+      }
+
+      break;
+   }
+   case 2:
+      screen->max_gl_core_version = 0;
+      screen->max_gl_compat_version = 13;
+      screen->max_gl_es1_version = 11;
+      screen->max_gl_es2_version = 0;
+      break;
+   default:
+      assert(!"unrecognized intel_screen::gen");
+      break;
+   }
+
+#ifndef FEATURE_ES1
+   screen->max_gl_es1_version = 0;
+#endif
+
+#ifndef FEATURE_ES2
+   screen->max_gl_es2_version = 0;
+#endif
+}
+
 /**
  * This is the driver specific part of the createNewScreen entry point.
  * Called when using DRI2.
@@ -1060,7 +1116,6 @@ static const
 __DRIconfig **intelInitScreen2(__DRIscreen *psp)
 {
    struct intel_screen *intelScreen;
-   unsigned int api_mask;
 
    if (psp->dri2.loader->base.version <= 2 ||
        psp->dri2.loader->getBuffersWithFormat == NULL) {
@@ -1119,18 +1174,17 @@ __DRIconfig **intelInitScreen2(__DRIscreen *psp)
 
    intel_override_separate_stencil(intelScreen);
 
-   api_mask = (1 << __DRI_API_OPENGL);
-#if FEATURE_ES1
-   api_mask |= (1 << __DRI_API_GLES);
-#endif
-#if FEATURE_ES2
-   api_mask |= (1 << __DRI_API_GLES2);
-#endif
-
-   if (IS_9XX(intelScreen->deviceID) || IS_965(intelScreen->deviceID))
-      psp->api_mask = api_mask;
-
    intelScreen->hw_has_swizzling = intel_detect_swizzling(intelScreen);
+
+   set_max_gl_versions(intelScreen);
+
+   psp->api_mask = (1 << __DRI_API_OPENGL);
+   if (intelScreen->max_gl_es1_version > 0)
+      psp->api_mask |= (1 << __DRI_API_GLES);
+   if (intelScreen->max_gl_es2_version > 0)
+      psp->api_mask |= (1 << __DRI_API_GLES2);
+   if (intelScreen->max_gl_es2_version >= 30)
+      psp->api_mask |= (1 << __DRI_API_GLES3);
 
    psp->extensions = intelScreenExtensions;
 
@@ -1174,8 +1228,7 @@ intelAllocateBuffer(__DRIscreen *screen,
 
    intelBuffer->base.attachment = attachment;
    intelBuffer->base.cpp = intelBuffer->region->cpp;
-   intelBuffer->base.pitch =
-         intelBuffer->region->pitch * intelBuffer->region->cpp;
+   intelBuffer->base.pitch = intelBuffer->region->pitch;
 
    return &intelBuffer->base;
 }

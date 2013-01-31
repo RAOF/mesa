@@ -41,9 +41,9 @@ public:
       ralloc_free(entry);
    }
 
-   symbol_table_entry(ir_variable *v)                     : v(v), f(0), t(0) {}
-   symbol_table_entry(ir_function *f)                     : v(0), f(f), t(0) {}
-   symbol_table_entry(const glsl_type *t)                 : v(0), f(0), t(t) {}
+   symbol_table_entry(ir_variable *v)               : v(v), f(0), t(0) {}
+   symbol_table_entry(ir_function *f)               : v(0), f(f), t(0) {}
+   symbol_table_entry(const glsl_type *t)           : v(0), f(0), t(t) {}
 
    ir_variable *v;
    ir_function *f;

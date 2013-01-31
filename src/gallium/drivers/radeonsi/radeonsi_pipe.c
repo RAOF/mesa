@@ -179,7 +179,10 @@ static void r600_destroy_context(struct pipe_context *context)
 	if (rctx->dummy_pixel_shader) {
 		rctx->context.delete_fs_state(&rctx->context, rctx->dummy_pixel_shader);
 	}
-	rctx->context.delete_depth_stencil_alpha_state(&rctx->context, rctx->custom_dsa_flush);
+	rctx->context.delete_depth_stencil_alpha_state(&rctx->context, rctx->custom_dsa_flush_depth_stencil);
+	rctx->context.delete_depth_stencil_alpha_state(&rctx->context, rctx->custom_dsa_flush_depth);
+	rctx->context.delete_depth_stencil_alpha_state(&rctx->context, rctx->custom_dsa_flush_stencil);
+	rctx->context.delete_depth_stencil_alpha_state(&rctx->context, rctx->custom_dsa_flush_inplace);
 	util_unreference_framebuffer_state(&rctx->framebuffer);
 
 	util_blitter_destroy(rctx->blitter);
@@ -222,7 +225,7 @@ static struct pipe_context *r600_create_context(struct pipe_screen *screen, void
 	case TAHITI:
 		si_init_state_functions(rctx);
 		LIST_INITHEAD(&rctx->active_query_list);
-		rctx->cs = rctx->ws->cs_create(rctx->ws);
+		rctx->cs = rctx->ws->cs_create(rctx->ws, RING_GFX);
 		rctx->max_db = 8;
 		si_init_config(rctx);
 		break;
@@ -304,7 +307,6 @@ static int r600_get_param(struct pipe_screen* pscreen, enum pipe_cap param)
 	case PIPE_CAP_TEXTURE_MIRROR_CLAMP:
 	case PIPE_CAP_BLEND_EQUATION_SEPARATE:
 	case PIPE_CAP_TEXTURE_SWIZZLE:
-	case PIPE_CAP_DEPTHSTENCIL_CLEAR_SEPARATE:
 	case PIPE_CAP_DEPTH_CLIP_DISABLE:
 	case PIPE_CAP_SHADER_STENCIL_EXPORT:
 	case PIPE_CAP_VERTEX_ELEMENT_INSTANCE_DIVISOR:

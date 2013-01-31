@@ -65,12 +65,12 @@ void r600_init_atom(struct r600_context *rctx,
 
 void r600_emit_cso_state(struct r600_context *rctx, struct r600_atom *atom)
 {
-	r600_emit_command_buffer(rctx->cs, ((struct r600_cso_state*)atom)->cb);
+	r600_emit_command_buffer(rctx->rings.gfx.cs, ((struct r600_cso_state*)atom)->cb);
 }
 
 void r600_emit_alphatest_state(struct r600_context *rctx, struct r600_atom *atom)
 {
-	struct radeon_winsys_cs *cs = rctx->cs;
+	struct radeon_winsys_cs *cs = rctx->rings.gfx.cs;
 	struct r600_alphatest_state *a = (struct r600_alphatest_state*)atom;
 	unsigned alpha_ref = a->sx_alpha_ref;
 
@@ -176,7 +176,7 @@ static void r600_set_blend_color(struct pipe_context *ctx,
 
 void r600_emit_blend_color(struct r600_context *rctx, struct r600_atom *atom)
 {
-	struct radeon_winsys_cs *cs = rctx->cs;
+	struct radeon_winsys_cs *cs = rctx->rings.gfx.cs;
 	struct pipe_blend_color *state = &rctx->blend_color.state;
 
 	r600_write_context_reg_seq(cs, R_028414_CB_BLEND_RED, 4);
@@ -188,7 +188,7 @@ void r600_emit_blend_color(struct r600_context *rctx, struct r600_atom *atom)
 
 void r600_emit_vgt_state(struct r600_context *rctx, struct r600_atom *atom)
 {
-	struct radeon_winsys_cs *cs = rctx->cs;
+	struct radeon_winsys_cs *cs = rctx->rings.gfx.cs;
 	struct r600_vgt_state *a = (struct r600_vgt_state *)atom;
 
 	r600_write_context_reg(cs, R_028A94_VGT_MULTI_PRIM_IB_RESET_EN, a->vgt_multi_prim_ib_reset_en);
@@ -197,7 +197,7 @@ void r600_emit_vgt_state(struct r600_context *rctx, struct r600_atom *atom)
 
 void r600_emit_vgt2_state(struct r600_context *rctx, struct r600_atom *atom)
 {
-	struct radeon_winsys_cs *cs = rctx->cs;
+	struct radeon_winsys_cs *cs = rctx->rings.gfx.cs;
 	struct r600_vgt2_state *a = (struct r600_vgt2_state *)atom;
 
 	r600_write_context_reg(cs, R_028408_VGT_INDX_OFFSET, a->vgt_indx_offset);
@@ -231,7 +231,7 @@ static void r600_set_stencil_ref(struct pipe_context *ctx,
 
 void r600_emit_stencil_ref(struct r600_context *rctx, struct r600_atom *atom)
 {
-	struct radeon_winsys_cs *cs = rctx->cs;
+	struct radeon_winsys_cs *cs = rctx->rings.gfx.cs;
 	struct r600_stencil_ref_state *a = (struct r600_stencil_ref_state*)atom;
 
 	r600_write_context_reg_seq(cs, R_028430_DB_STENCILREFMASK, 2);
@@ -588,19 +588,20 @@ static void r600_set_sampler_views(struct pipe_context *pipe, unsigned shader,
 			struct r600_texture *rtex =
 				(struct r600_texture*)rviews[i]->base.texture;
 
-			if (rtex->is_depth && !rtex->is_flushing_texture) {
-				dst->views.compressed_depthtex_mask |= 1 << i;
-			} else {
-				dst->views.compressed_depthtex_mask &= ~(1 << i);
-			}
+			if (rviews[i]->base.texture->target != PIPE_BUFFER) {
+				if (rtex->is_depth && !rtex->is_flushing_texture) {
+					dst->views.compressed_depthtex_mask |= 1 << i;
+				} else {
+					dst->views.compressed_depthtex_mask &= ~(1 << i);
+				}
 
-			/* Track compressed colorbuffers. */
-			if (rtex->cmask_size && rtex->fmask_size) {
-				dst->views.compressed_colortex_mask |= 1 << i;
-			} else {
-				dst->views.compressed_colortex_mask &= ~(1 << i);
+				/* Track compressed colorbuffers. */
+				if (rtex->cmask_size && rtex->fmask_size) {
+					dst->views.compressed_colortex_mask |= 1 << i;
+				} else {
+					dst->views.compressed_colortex_mask &= ~(1 << i);
+				}
 			}
-
 			/* Changing from array to non-arrays textures and vice versa requires
 			 * updating TEX_ARRAY_OVERRIDE in sampler states on R6xx-R7xx. */
 			if (rctx->chip_class <= R700 &&
@@ -625,6 +626,7 @@ static void r600_set_sampler_views(struct pipe_context *pipe, unsigned shader,
 	dst->views.compressed_depthtex_mask &= dst->views.enabled_mask;
 	dst->views.compressed_colortex_mask &= dst->views.enabled_mask;
 	dst->views.dirty_txq_constants = TRUE;
+	dst->views.dirty_buffer_constants = TRUE;
 	r600_sampler_views_dirty(rctx, &dst->views);
 
 	if (dirty_sampler_states_mask) {
@@ -656,7 +658,7 @@ static void r600_set_viewport_state(struct pipe_context *ctx,
 
 void r600_emit_viewport_state(struct r600_context *rctx, struct r600_atom *atom)
 {
-	struct radeon_winsys_cs *cs = rctx->cs;
+	struct radeon_winsys_cs *cs = rctx->rings.gfx.cs;
 	struct pipe_viewport_state *state = &rctx->viewport.state;
 
 	r600_write_context_reg_seq(cs, R_02843C_PA_CL_VPORT_XSCALE_0, 6);
@@ -1023,6 +1025,92 @@ static void r600_set_sample_mask(struct pipe_context *pipe, unsigned sample_mask
 	rctx->sample_mask.atom.dirty = true;
 }
 
+/*
+ * On r600/700 hw we don't have vertex fetch swizzle, though TBO
+ * doesn't require full swizzles it does need masking and setting alpha
+ * to one, so we setup a set of 5 constants with the masks + alpha value
+ * then in the shader, we AND the 4 components with 0xffffffff or 0,
+ * then OR the alpha with the value given here.
+ * We use a 6th constant to store the txq buffer size in
+ */
+static void r600_setup_buffer_constants(struct r600_context *rctx, int shader_type)
+{
+	struct r600_textures_info *samplers = &rctx->samplers[shader_type];
+	int bits;
+	uint32_t array_size;
+	struct pipe_constant_buffer cb;
+	int i, j;
+
+	if (!samplers->views.dirty_buffer_constants)
+		return;
+
+	samplers->views.dirty_buffer_constants = FALSE;
+
+	bits = util_last_bit(samplers->views.enabled_mask);
+	array_size = bits * 8 * sizeof(uint32_t) * 4;
+	samplers->buffer_constants = realloc(samplers->buffer_constants, array_size);
+	memset(samplers->buffer_constants, 0, array_size);
+	for (i = 0; i < bits; i++) {
+		if (samplers->views.enabled_mask & (1 << i)) {
+			int offset = i * 8;
+			const struct util_format_description *desc;
+			desc = util_format_description(samplers->views.views[i]->base.format);
+
+			for (j = 0; j < 4; j++)
+				if (j < desc->nr_channels)
+					samplers->buffer_constants[offset+j] = 0xffffffff;
+				else
+					samplers->buffer_constants[offset+j] = 0x0;
+			if (desc->nr_channels < 4) {
+				if (desc->channel[0].pure_integer)
+					samplers->buffer_constants[offset+4] = 1;
+				else
+					samplers->buffer_constants[offset+4] = 0x3f800000;
+			} else
+				samplers->buffer_constants[offset + 4] = 0;
+
+			samplers->buffer_constants[offset + 5] = samplers->views.views[i]->base.texture->width0 / util_format_get_blocksize(samplers->views.views[i]->base.format);
+		}
+	}
+
+	cb.buffer = NULL;
+	cb.user_buffer = samplers->buffer_constants;
+	cb.buffer_offset = 0;
+	cb.buffer_size = array_size;
+	rctx->context.set_constant_buffer(&rctx->context, shader_type, R600_BUFFER_INFO_CONST_BUFFER, &cb);
+	pipe_resource_reference(&cb.buffer, NULL);
+}
+
+/* On evergreen we only need to store the buffer size for TXQ */
+static void eg_setup_buffer_constants(struct r600_context *rctx, int shader_type)
+{
+	struct r600_textures_info *samplers = &rctx->samplers[shader_type];
+	int bits;
+	uint32_t array_size;
+	struct pipe_constant_buffer cb;
+	int i;
+
+	if (!samplers->views.dirty_buffer_constants)
+		return;
+
+	samplers->views.dirty_buffer_constants = FALSE;
+
+	bits = util_last_bit(samplers->views.enabled_mask);
+	array_size = bits * sizeof(uint32_t) * 4;
+	samplers->buffer_constants = realloc(samplers->buffer_constants, array_size);
+	memset(samplers->buffer_constants, 0, array_size);
+	for (i = 0; i < bits; i++)
+		if (samplers->views.enabled_mask & (1 << i))
+		   samplers->buffer_constants[i] = samplers->views.views[i]->base.texture->width0 / util_format_get_blocksize(samplers->views.views[i]->base.format);
+
+	cb.buffer = NULL;
+	cb.user_buffer = samplers->buffer_constants;
+	cb.buffer_offset = 0;
+	cb.buffer_size = array_size;
+	rctx->context.set_constant_buffer(&rctx->context, shader_type, R600_BUFFER_INFO_CONST_BUFFER, &cb);
+	pipe_resource_reference(&cb.buffer, NULL);
+}
+
 static void r600_setup_txq_cube_array_constants(struct r600_context *rctx, int shader_type)
 {
 	struct r600_textures_info *samplers = &rctx->samplers[shader_type];
@@ -1090,6 +1178,21 @@ static bool r600_update_derived_state(struct r600_context *rctx)
 	if (ps_dirty)
 		r600_context_pipe_state_set(rctx, &rctx->ps_shader->current->rstate);
 
+	/* on R600 we stuff masks + txq info into one constant buffer */
+	/* on evergreen we only need a txq info one */
+	if (rctx->chip_class < EVERGREEN) {
+		if (rctx->ps_shader && rctx->ps_shader->current->shader.uses_tex_buffers)
+			r600_setup_buffer_constants(rctx, PIPE_SHADER_FRAGMENT);
+		if (rctx->vs_shader && rctx->vs_shader->current->shader.uses_tex_buffers)
+			r600_setup_buffer_constants(rctx, PIPE_SHADER_VERTEX);
+	} else {
+		if (rctx->ps_shader && rctx->ps_shader->current->shader.uses_tex_buffers)
+			eg_setup_buffer_constants(rctx, PIPE_SHADER_FRAGMENT);
+		if (rctx->vs_shader && rctx->vs_shader->current->shader.uses_tex_buffers)
+			eg_setup_buffer_constants(rctx, PIPE_SHADER_VERTEX);
+	}
+
+
 	if (rctx->ps_shader && rctx->ps_shader->current->shader.has_txq_cube_array_z_comp)
 		r600_setup_txq_cube_array_constants(rctx, PIPE_SHADER_FRAGMENT);
 	if (rctx->vs_shader && rctx->vs_shader->current->shader.has_txq_cube_array_z_comp)
@@ -1140,7 +1243,7 @@ static unsigned r600_conv_prim_to_gs_out(unsigned mode)
 
 void r600_emit_clip_misc_state(struct r600_context *rctx, struct r600_atom *atom)
 {
-	struct radeon_winsys_cs *cs = rctx->cs;
+	struct radeon_winsys_cs *cs = rctx->rings.gfx.cs;
 	struct r600_clip_misc_state *state = &rctx->clip_misc_state;
 
 	r600_write_context_reg(cs, R_028810_PA_CL_CLIP_CNTL,
@@ -1158,7 +1261,7 @@ static void r600_draw_vbo(struct pipe_context *ctx, const struct pipe_draw_info 
 	struct pipe_index_buffer ib = {};
 	unsigned i;
 	struct r600_block *dirty_block = NULL, *next_block = NULL;
-	struct radeon_winsys_cs *cs = rctx->cs;
+	struct radeon_winsys_cs *cs = rctx->rings.gfx.cs;
 
 	if (!info.count && (info.indexed || !info.count_from_stream_output)) {
 		assert(0);
@@ -1168,6 +1271,11 @@ static void r600_draw_vbo(struct pipe_context *ctx, const struct pipe_draw_info 
 	if (!rctx->vs_shader) {
 		assert(0);
 		return;
+	}
+
+	/* make sure that the gfx ring is only one active */
+	if (rctx->rings.dma.cs) {
+		rctx->rings.dma.flush(rctx, RADEON_FLUSH_ASYNC);
 	}
 
 	if (!r600_update_derived_state(rctx)) {
@@ -1302,7 +1410,7 @@ static void r600_draw_vbo(struct pipe_context *ctx, const struct pipe_draw_info 
 			cs->buf[cs->cdw++] = info.count;
 			cs->buf[cs->cdw++] = V_0287F0_DI_SRC_SEL_DMA;
 			cs->buf[cs->cdw++] = PKT3(PKT3_NOP, 0, rctx->predicate_drawing);
-			cs->buf[cs->cdw++] = r600_context_bo_reloc(rctx, (struct r600_resource*)ib.buffer, RADEON_USAGE_READ);
+			cs->buf[cs->cdw++] = r600_context_bo_reloc(rctx, &rctx->rings.gfx, (struct r600_resource*)ib.buffer, RADEON_USAGE_READ);
 		}
 	} else {
 		if (info.count_from_stream_output) {
@@ -1319,7 +1427,7 @@ static void r600_draw_vbo(struct pipe_context *ctx, const struct pipe_draw_info 
 			cs->buf[cs->cdw++] = 0; /* unused */
 
 			cs->buf[cs->cdw++] = PKT3(PKT3_NOP, 0, 0);
-			cs->buf[cs->cdw++] = r600_context_bo_reloc(rctx, t->buf_filled_size, RADEON_USAGE_READ);
+			cs->buf[cs->cdw++] = r600_context_bo_reloc(rctx, &rctx->rings.gfx, t->buf_filled_size, RADEON_USAGE_READ);
 		}
 
 		cs->buf[cs->cdw++] = PKT3(PKT3_DRAW_INDEX_AUTO, 1, rctx->predicate_drawing);
@@ -1631,12 +1739,12 @@ void r600_init_common_state_functions(struct r600_context *rctx)
 void r600_trace_emit(struct r600_context *rctx)
 {
 	struct r600_screen *rscreen = rctx->screen;
-	struct radeon_winsys_cs *cs = rctx->cs;
+	struct radeon_winsys_cs *cs = rctx->rings.gfx.cs;
 	uint64_t va;
 	uint32_t reloc;
 
 	va = r600_resource_va(&rscreen->screen, (void*)rscreen->trace_bo);
-	reloc = r600_context_bo_reloc(rctx, rscreen->trace_bo, RADEON_USAGE_READWRITE);
+	reloc = r600_context_bo_reloc(rctx, &rctx->rings.gfx, rscreen->trace_bo, RADEON_USAGE_READWRITE);
 	r600_write_value(cs, PKT3(PKT3_MEM_WRITE, 3, 0));
 	r600_write_value(cs, va & 0xFFFFFFFFUL);
 	r600_write_value(cs, (va >> 32UL) & 0xFFUL);

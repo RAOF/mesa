@@ -132,12 +132,13 @@ verify_parameter_modes(_mesa_glsl_parse_state *state,
       }
 
       /* Verify that 'out' and 'inout' actual parameters are lvalues. */
-      if (formal->mode == ir_var_out || formal->mode == ir_var_inout) {
+      if (formal->mode == ir_var_function_out
+          || formal->mode == ir_var_function_inout) {
 	 const char *mode = NULL;
 	 switch (formal->mode) {
-	 case ir_var_out:   mode = "out";   break;
-	 case ir_var_inout: mode = "inout"; break;
-	 default:           assert(false);  break;
+	 case ir_var_function_out:   mode = "out";   break;
+	 case ir_var_function_inout: mode = "inout"; break;
+	 default:                    assert(false);  break;
 	 }
 
 	 /* This AST-based check catches errors like f(i++).  The IR-based
@@ -183,7 +184,7 @@ verify_parameter_modes(_mesa_glsl_parse_state *state,
  */
 static ir_rvalue *
 generate_call(exec_list *instructions, ir_function_signature *sig,
-	      YYLTYPE *loc, exec_list *actual_parameters,
+	      exec_list *actual_parameters,
 	      ir_call **call_ir,
 	      struct _mesa_glsl_parse_state *state)
 {
@@ -210,13 +211,13 @@ generate_call(exec_list *instructions, ir_function_signature *sig,
       if (formal->type->is_numeric() || formal->type->is_boolean()) {
 	 switch (formal->mode) {
 	 case ir_var_const_in:
-	 case ir_var_in: {
+	 case ir_var_function_in: {
 	    ir_rvalue *converted
 	       = convert_component(actual, formal->type);
 	    actual->replace_with(converted);
 	    break;
 	 }
-	 case ir_var_out:
+	 case ir_var_function_out:
 	    if (actual->type != formal->type) {
 	       /* To convert an out parameter, we need to create a
 		* temporary variable to hold the value before conversion,
@@ -254,7 +255,7 @@ generate_call(exec_list *instructions, ir_function_signature *sig,
 	       actual->replace_with(deref_tmp_2);
 	    }
 	    break;
-	 case ir_var_inout:
+	 case ir_var_function_inout:
 	    /* Inout parameters should never require conversion, since that
 	     * would require an implicit conversion to exist both to and
 	     * from the formal parameter type, and there are no
@@ -1501,7 +1502,7 @@ ast_function_expression::hir(exec_list *instructions,
 	 /* an error has already been emitted */
 	 value = ir_rvalue::error_value(ctx);
       } else {
-	 value = generate_call(instructions, sig, &loc, &actual_parameters,
+	 value = generate_call(instructions, sig, &actual_parameters,
 			       &call, state);
       }
 

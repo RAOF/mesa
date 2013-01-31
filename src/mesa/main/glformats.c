@@ -271,7 +271,8 @@ _mesa_bytes_per_pixel(GLenum format, GLenum type)
    case GL_UNSIGNED_INT_10_10_10_2:
    case GL_UNSIGNED_INT_2_10_10_10_REV:
       if (format == GL_RGBA || format == GL_BGRA || format == GL_ABGR_EXT ||
-          format == GL_RGBA_INTEGER_EXT || format == GL_BGRA_INTEGER_EXT)
+          format == GL_RGBA_INTEGER_EXT || format == GL_BGRA_INTEGER_EXT ||
+          format == GL_RGB)
          return sizeof(GLuint);
       else
          return -1;
@@ -353,21 +354,9 @@ _mesa_bytes_per_vertex_attrib(GLint comps, GLenum type)
  * Test if the given format is an integer (non-normalized) format.
  */
 GLboolean
-_mesa_is_enum_format_integer(GLenum format)
+_mesa_is_enum_format_unsigned_int(GLenum format)
 {
    switch (format) {
-   /* generic integer formats */
-   case GL_RED_INTEGER_EXT:
-   case GL_GREEN_INTEGER_EXT:
-   case GL_BLUE_INTEGER_EXT:
-   case GL_ALPHA_INTEGER_EXT:
-   case GL_RGB_INTEGER_EXT:
-   case GL_RGBA_INTEGER_EXT:
-   case GL_BGR_INTEGER_EXT:
-   case GL_BGRA_INTEGER_EXT:
-   case GL_LUMINANCE_INTEGER_EXT:
-   case GL_LUMINANCE_ALPHA_INTEGER_EXT:
-   case GL_RG_INTEGER:
    /* specific integer formats */
    case GL_RGBA32UI_EXT:
    case GL_RGB32UI_EXT:
@@ -393,6 +382,34 @@ _mesa_is_enum_format_integer(GLenum format)
    case GL_INTENSITY8UI_EXT:
    case GL_LUMINANCE8UI_EXT:
    case GL_LUMINANCE_ALPHA8UI_EXT:
+   case GL_RGB10_A2UI:
+      return GL_TRUE;
+   default:
+      return GL_FALSE;
+   }
+}
+
+
+/**
+ * Test if the given format is an integer (non-normalized) format.
+ */
+GLboolean
+_mesa_is_enum_format_signed_int(GLenum format)
+{
+   switch (format) {
+   /* generic integer formats */
+   case GL_RED_INTEGER_EXT:
+   case GL_GREEN_INTEGER_EXT:
+   case GL_BLUE_INTEGER_EXT:
+   case GL_ALPHA_INTEGER_EXT:
+   case GL_RGB_INTEGER_EXT:
+   case GL_RGBA_INTEGER_EXT:
+   case GL_BGR_INTEGER_EXT:
+   case GL_BGRA_INTEGER_EXT:
+   case GL_LUMINANCE_INTEGER_EXT:
+   case GL_LUMINANCE_ALPHA_INTEGER_EXT:
+   case GL_RG_INTEGER:
+   /* specific integer formats */
    case GL_RGBA32I_EXT:
    case GL_RGB32I_EXT:
    case GL_RG32I:
@@ -417,11 +434,21 @@ _mesa_is_enum_format_integer(GLenum format)
    case GL_INTENSITY8I_EXT:
    case GL_LUMINANCE8I_EXT:
    case GL_LUMINANCE_ALPHA8I_EXT:
-   case GL_RGB10_A2UI:
       return GL_TRUE;
    default:
       return GL_FALSE;
    }
+}
+
+
+/**
+ * Test if the given format is an integer (non-normalized) format.
+ */
+GLboolean
+_mesa_is_enum_format_integer(GLenum format)
+{
+   return _mesa_is_enum_format_unsigned_int(format) ||
+          _mesa_is_enum_format_signed_int(format);
 }
 
 
@@ -840,18 +867,17 @@ _mesa_is_compressed_format(struct gl_context *ctx, GLenum format)
    switch (format) {
    case GL_COMPRESSED_RGB_S3TC_DXT1_EXT:
    case GL_COMPRESSED_RGBA_S3TC_DXT1_EXT:
-      return ctx->Extensions.EXT_texture_compression_s3tc;
    case GL_COMPRESSED_RGBA_S3TC_DXT3_EXT:
    case GL_COMPRESSED_RGBA_S3TC_DXT5_EXT:
-      return (_mesa_is_desktop_gl(ctx) &&
-	      ctx->Extensions.EXT_texture_compression_s3tc) ||
-	     (ctx->API == API_OPENGLES2 &&
-	      ctx->Extensions.ANGLE_texture_compression_dxt);
+      /* Assume that the ANGLE flag will always be set if the EXT flag is set.
+       */
+      return ctx->Extensions.ANGLE_texture_compression_dxt;
    case GL_RGB_S3TC:
    case GL_RGB4_S3TC:
    case GL_RGBA_S3TC:
    case GL_RGBA4_S3TC:
-      return _mesa_is_desktop_gl(ctx) && ctx->Extensions.S3_s3tc;
+      return _mesa_is_desktop_gl(ctx) &&
+         ctx->Extensions.ANGLE_texture_compression_dxt;
    case GL_COMPRESSED_SRGB_S3TC_DXT1_EXT:
    case GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT1_EXT:
    case GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT3_EXT:
@@ -1028,6 +1054,32 @@ _mesa_base_format_has_channel(GLenum base_format, GLenum pname)
    }
 
    return GL_FALSE;
+}
+
+
+/**
+ * Returns the number of channels/components for a base format.
+ */
+GLint
+_mesa_base_format_component_count(GLenum base_format)
+{
+   switch (base_format) {
+   case GL_RED:
+   case GL_ALPHA:
+   case GL_INTENSITY:
+   case GL_DEPTH_COMPONENT:
+      return 1;
+   case GL_RG:
+   case GL_LUMINANCE_ALPHA:
+   case GL_DEPTH_STENCIL:
+      return 2;
+   case GL_RGB:
+      return 3;
+   case GL_RGBA:
+      return 4;
+   default:
+      return -1;
+   }
 }
 
 
@@ -1236,6 +1288,10 @@ _mesa_error_check_format_and_type(const struct gl_context *ctx,
           ctx->Extensions.ARB_texture_rgb10_a2ui) {
          break; /* OK */
       }
+      if (type == GL_UNSIGNED_INT_2_10_10_10_REV && format == GL_RGB &&
+          ctx->API == API_OPENGLES2) {
+         break; /* OK by GL_EXT_texture_type_2_10_10_10_REV */
+      }
       return GL_INVALID_OPERATION;
 
    case GL_UNSIGNED_INT_24_8:
@@ -1349,6 +1405,10 @@ _mesa_error_check_format_and_type(const struct gl_context *ctx,
             case GL_UNSIGNED_SHORT_5_6_5:
             case GL_UNSIGNED_SHORT_5_6_5_REV:
                return GL_NO_ERROR;
+            case GL_UNSIGNED_INT_2_10_10_10_REV:
+               /* OK by GL_EXT_texture_type_2_10_10_10_REV */
+               return (ctx->API == API_OPENGLES2)
+                  ? GL_NO_ERROR : GL_INVALID_ENUM;
             case GL_HALF_FLOAT:
                return ctx->Extensions.ARB_half_float_pixel
                   ? GL_NO_ERROR : GL_INVALID_ENUM;
@@ -1425,8 +1485,18 @@ _mesa_error_check_format_and_type(const struct gl_context *ctx,
          else if (ctx->Extensions.ARB_depth_buffer_float &&
              type == GL_FLOAT_32_UNSIGNED_INT_24_8_REV)
             return GL_NO_ERROR;
-         else
+         switch (type) {
+         case GL_BYTE:
+         case GL_UNSIGNED_BYTE:
+         case GL_SHORT:
+         case GL_UNSIGNED_SHORT:
+         case GL_INT:
+         case GL_UNSIGNED_INT:
+         case GL_FLOAT:
+            return GL_INVALID_OPERATION;
+         default:
             return GL_INVALID_ENUM;
+         }
 
       case GL_DUDV_ATI:
       case GL_DU8DV8_ATI:
@@ -1613,6 +1683,441 @@ _mesa_es_error_check_format_and_type(GLenum format, GLenum type,
 
    default:
       return GL_INVALID_VALUE;
+   }
+
+   return type_valid ? GL_NO_ERROR : GL_INVALID_OPERATION;
+}
+
+
+/**
+ * Do error checking of format/type combinations for OpenGL ES 3
+ * glTex[Sub]Image.
+ * \return error code, or GL_NO_ERROR.
+ */
+GLenum
+_mesa_es3_error_check_format_and_type(GLenum format, GLenum type,
+                                      GLenum internalFormat)
+{
+   GLboolean type_valid = GL_TRUE;
+
+   switch (format) {
+   case GL_RGBA:
+      switch (type) {
+      case GL_UNSIGNED_BYTE:
+         switch (internalFormat) {
+         case GL_RGBA:
+         case GL_RGBA8:
+         case GL_RGB5_A1:
+         case GL_RGBA4:
+         case GL_SRGB8_ALPHA8_EXT:
+            break;
+         default:
+            return GL_INVALID_OPERATION;
+         }
+         break;
+
+      case GL_BYTE:
+         if (internalFormat != GL_RGBA8_SNORM)
+            return GL_INVALID_OPERATION;
+         break;
+
+      case GL_UNSIGNED_SHORT_4_4_4_4:
+         switch (internalFormat) {
+         case GL_RGBA:
+         case GL_RGBA4:
+            break;
+         default:
+            return GL_INVALID_OPERATION;
+         }
+         break;
+
+      case GL_UNSIGNED_SHORT_5_5_5_1:
+         switch (internalFormat) {
+         case GL_RGBA:
+         case GL_RGB5_A1:
+            break;
+         default:
+            return GL_INVALID_OPERATION;
+         }
+         break;
+
+      case GL_UNSIGNED_INT_2_10_10_10_REV:
+         switch (internalFormat) {
+         case GL_RGBA: /* GL_EXT_texture_type_2_10_10_10_REV */
+         case GL_RGB10_A2:
+         case GL_RGB5_A1:
+            break;
+         default:
+            return GL_INVALID_OPERATION;
+         }
+         break;
+
+      case GL_HALF_FLOAT:
+         if (internalFormat != GL_RGBA16F)
+            return GL_INVALID_OPERATION;
+         break;
+
+      case GL_FLOAT:
+         switch (internalFormat) {
+         case GL_RGBA16F:
+         case GL_RGBA32F:
+            break;
+         default:
+            return GL_INVALID_OPERATION;
+         }
+         break;
+
+      default:
+         return GL_INVALID_OPERATION;
+      }
+      break;
+
+   case GL_RGBA_INTEGER:
+      switch (type) {
+      case GL_UNSIGNED_BYTE:
+         if (internalFormat != GL_RGBA8UI)
+            return GL_INVALID_OPERATION;
+         break;
+
+      case GL_BYTE:
+         if (internalFormat != GL_RGBA8I)
+            return GL_INVALID_OPERATION;
+         break;
+
+      case GL_UNSIGNED_SHORT:
+         if (internalFormat != GL_RGBA16UI)
+            return GL_INVALID_OPERATION;
+         break;
+
+      case GL_SHORT:
+         if (internalFormat != GL_RGBA16I)
+            return GL_INVALID_OPERATION;
+         break;
+
+      case GL_UNSIGNED_INT:
+         if (internalFormat != GL_RGBA32UI)
+            return GL_INVALID_OPERATION;
+         break;
+
+      case GL_INT:
+         if (internalFormat != GL_RGBA32I)
+            return GL_INVALID_OPERATION;
+         break;
+
+      case GL_UNSIGNED_INT_2_10_10_10_REV:
+         if (internalFormat != GL_RGB10_A2UI)
+            return GL_INVALID_OPERATION;
+         break;
+
+      default:
+         return GL_INVALID_OPERATION;
+      }
+      break;
+
+   case GL_RGB:
+      switch (type) {
+      case GL_UNSIGNED_BYTE:
+         switch (internalFormat) {
+         case GL_RGB:
+         case GL_RGB8:
+         case GL_RGB565:
+         case GL_SRGB8:
+            break;
+         default:
+            return GL_INVALID_OPERATION;
+         }
+         break;
+
+      case GL_BYTE:
+         if (internalFormat != GL_RGB8_SNORM)
+            return GL_INVALID_OPERATION;
+         break;
+
+      case GL_UNSIGNED_SHORT_5_6_5:
+         switch (internalFormat) {
+         case GL_RGB:
+         case GL_RGB565:
+            break;
+         default:
+            return GL_INVALID_OPERATION;
+         }
+         break;
+
+      case GL_UNSIGNED_INT_10F_11F_11F_REV:
+         if (internalFormat != GL_R11F_G11F_B10F)
+            return GL_INVALID_OPERATION;
+         break;
+
+      case GL_UNSIGNED_INT_5_9_9_9_REV:
+         if (internalFormat != GL_RGB9_E5)
+            return GL_INVALID_OPERATION;
+         break;
+
+      case GL_HALF_FLOAT:
+         switch (internalFormat) {
+         case GL_RGB16F:
+         case GL_R11F_G11F_B10F:
+         case GL_RGB9_E5:
+            break;
+         default:
+            return GL_INVALID_OPERATION;
+         }
+         break;
+
+      case GL_FLOAT:
+         switch (internalFormat) {
+         case GL_RGB16F:
+         case GL_RGB32F:
+         case GL_R11F_G11F_B10F:
+         case GL_RGB9_E5:
+            break;
+         default:
+            return GL_INVALID_OPERATION;
+         }
+         break;
+
+      case GL_UNSIGNED_INT_2_10_10_10_REV:
+         switch (internalFormat) {
+         case GL_RGB: /* GL_EXT_texture_type_2_10_10_10_REV */
+            break;
+         default:
+            return GL_INVALID_OPERATION;
+         }
+         break;
+
+      default:
+         return GL_INVALID_OPERATION;
+      }
+      break;
+
+   case GL_RGB_INTEGER:
+      switch (type) {
+      case GL_UNSIGNED_BYTE:
+         if (internalFormat != GL_RGB8UI)
+            return GL_INVALID_OPERATION;
+         break;
+
+      case GL_BYTE:
+         if (internalFormat != GL_RGB8I)
+            return GL_INVALID_OPERATION;
+         break;
+
+      case GL_UNSIGNED_SHORT:
+         if (internalFormat != GL_RGB16UI)
+            return GL_INVALID_OPERATION;
+         break;
+
+      case GL_SHORT:
+         if (internalFormat != GL_RGB16I)
+            return GL_INVALID_OPERATION;
+         break;
+
+      case GL_UNSIGNED_INT:
+         if (internalFormat != GL_RGB32UI)
+            return GL_INVALID_OPERATION;
+         break;
+
+      case GL_INT:
+         if (internalFormat != GL_RGB32I)
+            return GL_INVALID_OPERATION;
+         break;
+
+      default:
+         return GL_INVALID_OPERATION;
+      }
+      break;
+
+   case GL_RG:
+      switch (type) {
+      case GL_UNSIGNED_BYTE:
+         if (internalFormat != GL_RG8)
+            return GL_INVALID_OPERATION;
+         break;
+
+      case GL_BYTE:
+         if (internalFormat != GL_RG8_SNORM)
+            return GL_INVALID_OPERATION;
+         break;
+
+      case GL_HALF_FLOAT:
+         if (internalFormat != GL_RG16F)
+            return GL_INVALID_OPERATION;
+         break;
+
+      case GL_FLOAT:
+         switch (internalFormat) {
+         case GL_RG16F:
+         case GL_RG32F:
+            break;
+         default:
+            return GL_INVALID_OPERATION;
+         }
+         break;
+
+      default:
+         return GL_INVALID_OPERATION;
+      }
+      break;
+
+   case GL_RG_INTEGER:
+      switch (type) {
+      case GL_UNSIGNED_BYTE:
+         if (internalFormat != GL_RG8UI)
+            return GL_INVALID_OPERATION;
+         break;
+
+      case GL_BYTE:
+         if (internalFormat != GL_RG8I)
+            return GL_INVALID_OPERATION;
+         break;
+
+      case GL_UNSIGNED_SHORT:
+         if (internalFormat != GL_RG16UI)
+            return GL_INVALID_OPERATION;
+         break;
+
+      case GL_SHORT:
+         if (internalFormat != GL_RG16I)
+            return GL_INVALID_OPERATION;
+         break;
+
+      case GL_UNSIGNED_INT:
+         if (internalFormat != GL_RG32UI)
+            return GL_INVALID_OPERATION;
+         break;
+
+      case GL_INT:
+         if (internalFormat != GL_RG32I)
+            return GL_INVALID_OPERATION;
+         break;
+
+      default:
+         return GL_INVALID_OPERATION;
+      }
+      break;
+
+   case GL_RED:
+      switch (type) {
+      case GL_UNSIGNED_BYTE:
+         if (internalFormat != GL_R8)
+            return GL_INVALID_OPERATION;
+         break;
+
+      case GL_BYTE:
+         if (internalFormat != GL_R8_SNORM)
+            return GL_INVALID_OPERATION;
+         break;
+
+      case GL_HALF_FLOAT:
+         if (internalFormat != GL_R16F)
+            return GL_INVALID_OPERATION;
+         break;
+
+      case GL_FLOAT:
+         switch (internalFormat) {
+         case GL_R16F:
+         case GL_R32F:
+            break;
+         default:
+            return GL_INVALID_OPERATION;
+         }
+         break;
+
+      default:
+         return GL_INVALID_OPERATION;
+      }
+      break;
+
+   case GL_RED_INTEGER:
+      switch (type) {
+      case GL_UNSIGNED_BYTE:
+         if (internalFormat != GL_R8UI)
+            return GL_INVALID_OPERATION;
+         break;
+
+      case GL_BYTE:
+         if (internalFormat != GL_R8I)
+            return GL_INVALID_OPERATION;
+         break;
+
+      case GL_UNSIGNED_SHORT:
+         if (internalFormat != GL_R16UI)
+            return GL_INVALID_OPERATION;
+         break;
+
+      case GL_SHORT:
+         if (internalFormat != GL_R16I)
+            return GL_INVALID_OPERATION;
+         break;
+
+      case GL_UNSIGNED_INT:
+         if (internalFormat != GL_R32UI)
+            return GL_INVALID_OPERATION;
+         break;
+
+      case GL_INT:
+         if (internalFormat != GL_R32I)
+            return GL_INVALID_OPERATION;
+         break;
+
+      default:
+         return GL_INVALID_OPERATION;
+      }
+      break;
+
+   case GL_DEPTH_COMPONENT:
+      switch (type) {
+      case GL_UNSIGNED_SHORT:
+         if (internalFormat != GL_DEPTH_COMPONENT
+             && internalFormat != GL_DEPTH_COMPONENT16)
+            return GL_INVALID_OPERATION;
+         break;
+
+      case GL_UNSIGNED_INT:
+         switch (internalFormat) {
+         case GL_DEPTH_COMPONENT:
+         case GL_DEPTH_COMPONENT16:
+         case GL_DEPTH_COMPONENT24:
+            break;
+         default:
+            return GL_INVALID_OPERATION;
+         }
+         break;
+
+      case GL_FLOAT:
+         if (internalFormat != GL_DEPTH_COMPONENT32F)
+            return GL_INVALID_OPERATION;
+         break;
+
+      default:
+         return GL_INVALID_OPERATION;
+      }
+      break;
+
+   case GL_DEPTH_STENCIL:
+      switch (type) {
+      case GL_UNSIGNED_INT_24_8:
+         if (internalFormat != GL_DEPTH_STENCIL
+             && internalFormat != GL_DEPTH24_STENCIL8)
+            return GL_INVALID_OPERATION;
+         break;
+
+      case GL_FLOAT_32_UNSIGNED_INT_24_8_REV:
+         if (internalFormat != GL_DEPTH32F_STENCIL8)
+            return GL_INVALID_OPERATION;
+         break;
+
+      default:
+         return GL_INVALID_OPERATION;
+      }
+      break;
+
+   case GL_ALPHA:
+   case GL_LUMINANCE:
+   case GL_LUMINANCE_ALPHA:
+      if (type != GL_UNSIGNED_BYTE || format != internalFormat)
+         return GL_INVALID_OPERATION;
+      break;
    }
 
    return type_valid ? GL_NO_ERROR : GL_INVALID_OPERATION;

@@ -480,6 +480,23 @@ static int is_alu_mova_inst(struct r600_bytecode *bc, struct r600_bytecode_alu *
 	}
 }
 
+static int alu_uses_rel(struct r600_bytecode *bc, struct r600_bytecode_alu *alu)
+{
+	unsigned num_src = r600_bytecode_get_num_operands(bc, alu);
+	unsigned src;
+
+	if (alu->dst.rel) {
+		return 1;
+	}
+
+	for (src = 0; src < num_src; ++src) {
+		if (alu->src[src].rel) {
+			return 1;
+		}
+	}
+	return 0;
+}
+
 static int is_opcode_in_range(unsigned opcode, unsigned min, unsigned max)
 {
 	return min <= opcode && opcode <= max;
@@ -1084,6 +1101,14 @@ static int merge_inst_groups(struct r600_bytecode *bc, struct r600_bytecode_alu 
 					return 0;
 				have_mova = 1;
 			}
+
+			if (alu_uses_rel(bc, prev[i])) {
+				if (have_mova) {
+					return 0;
+				}
+				have_rel = 1;
+			}
+
 			num_once_inst += is_alu_once_inst(bc, prev[i]);
 		}
 		if (slots[i] && r600_bytecode_alu_nliterals(bc, slots[i], literal, &nliteral))
@@ -1131,21 +1156,23 @@ static int merge_inst_groups(struct r600_bytecode *bc, struct r600_bytecode_alu 
 		if (is_nop_inst(bc, alu))
 			return 0;
 
-		/* Let's check dst gpr. */
-		if (alu->dst.rel) {
-			if (have_mova)
+		if (is_alu_mova_inst(bc, alu)) {
+			if (have_rel) {
 				return 0;
+			}
+			have_mova = 1;
+		}
+
+		if (alu_uses_rel(bc, alu)) {
+			if (have_mova) {
+				return 0;
+			}
 			have_rel = 1;
 		}
 
 		/* Let's check source gprs */
 		num_src = r600_bytecode_get_num_operands(bc, alu);
 		for (src = 0; src < num_src; ++src) {
-			if (alu->src[src].rel) {
-				if (have_mova)
-					return 0;
-				have_rel = 1;
-			}
 
 			/* Constants don't matter. */
 			if (!is_gpr(alu->src[src].sel))
@@ -1394,6 +1421,7 @@ static int load_ar_r6xx(struct r600_bytecode *bc)
 	memset(&alu, 0, sizeof(alu));
 	alu.inst = V_SQ_ALU_WORD1_OP2_SQ_OP2_INST_MOVA_GPR_INT;
 	alu.src[0].sel = bc->ar_reg;
+	alu.src[0].chan = bc->ar_chan;
 	alu.last = 1;
 	alu.index_mode = INDEX_MODE_LOOP;
 	r = r600_bytecode_add_alu(bc, &alu);
@@ -1424,6 +1452,7 @@ static int load_ar(struct r600_bytecode *bc)
 	memset(&alu, 0, sizeof(alu));
 	alu.inst = BC_INST(bc, V_SQ_ALU_WORD1_OP2_SQ_OP2_INST_MOVA_INT);
 	alu.src[0].sel = bc->ar_reg;
+	alu.src[0].chan = bc->ar_chan;
 	alu.last = 1;
 	r = r600_bytecode_add_alu(bc, &alu);
 	if (r)
@@ -1625,6 +1654,7 @@ int r600_bytecode_add_vtx(struct r600_bytecode *bc, const struct r600_bytecode_v
 			break;
 		default:
 			R600_ERR("Unknown chip class %d.\n", bc->chip_class);
+			free(nvtx);
 			return -EINVAL;
 		}
 	}
@@ -2608,7 +2638,7 @@ void r600_bytecode_dump(struct r600_bytecode *bc)
 	fprintf(stderr, "--------------------------------------\n");
 }
 
-static void r600_vertex_data_type(enum pipe_format pformat,
+void r600_vertex_data_type(enum pipe_format pformat,
 				  unsigned *format,
 				  unsigned *num_format, unsigned *format_comp, unsigned *endian)
 {
@@ -2889,8 +2919,7 @@ void *r600_create_vertex_fetch_shader(struct pipe_context *ctx,
 		return NULL;
 	}
 
-	bytecode = rctx->ws->buffer_map(shader->buffer->cs_buf, rctx->cs,
-					PIPE_TRANSFER_WRITE | PIPE_TRANSFER_UNSYNCHRONIZED);
+	bytecode = r600_buffer_mmap_sync_with_rings(rctx, shader->buffer, PIPE_TRANSFER_WRITE | PIPE_TRANSFER_UNSYNCHRONIZED);
 	bytecode += shader->offset / 4;
 
 	if (R600_BIG_ENDIAN) {
@@ -2966,4 +2995,6 @@ void r600_bytecode_export_read(struct r600_bytecode_output *output, uint32_t wor
 	output->end_of_program = G_SQ_CF_ALLOC_EXPORT_WORD1_END_OF_PROGRAM(word1);
 	output->inst = R600_S_SQ_CF_ALLOC_EXPORT_WORD1_CF_INST(G_SQ_CF_ALLOC_EXPORT_WORD1_CF_INST(word1));
 	output->barrier = G_SQ_CF_ALLOC_EXPORT_WORD1_BARRIER(word1);
+	output->array_size = G_SQ_CF_ALLOC_EXPORT_WORD1_BUF_ARRAY_SIZE(word1);
+	output->comp_mask = G_SQ_CF_ALLOC_EXPORT_WORD1_BUF_COMP_MASK(word1);
 }

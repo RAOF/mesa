@@ -32,9 +32,10 @@ struct r600_shader_io {
 	int			sid;
 	int			spi_sid;
 	unsigned		interpolate;
+	unsigned		ij_index;
 	boolean                 centroid;
 	unsigned		lds_pos; /* for evergreen */
-	unsigned		potential_back_facing_reg;
+	unsigned		back_color_input;
 	unsigned		write_mask;
 };
 
@@ -61,6 +62,7 @@ struct r600_shader {
 	boolean			vs_out_misc_write;
 	boolean			vs_out_point_size;
 	boolean			has_txq_cube_array_z_comp;
+	boolean			uses_tex_buffers;
 };
 
 struct r600_shader_key {

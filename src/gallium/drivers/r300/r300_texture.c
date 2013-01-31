@@ -906,14 +906,23 @@ static void r300_texture_setup_fb_state(struct r300_surface *surf)
         surf->format = r300_translate_out_fmt(surf->base.format);
         surf->colormask_swizzle =
             r300_translate_colormask_swizzle(surf->base.format);
+        surf->pitch_cmask = tex->tex.cmask_stride_in_pixels;
     }
 }
 
 static void r300_texture_destroy(struct pipe_screen *screen,
                                  struct pipe_resource* texture)
 {
+    struct r300_screen *rscreen = r300_screen(screen);
     struct r300_resource* tex = (struct r300_resource*)texture;
 
+    if (tex->tex.cmask_dwords) {
+        pipe_mutex_lock(rscreen->cmask_mutex);
+        if (texture == rscreen->cmask_resource) {
+            rscreen->cmask_resource = NULL;
+        }
+        pipe_mutex_unlock(rscreen->cmask_mutex);
+    }
     pb_reference(&tex->buf, NULL);
     FREE(tex);
 }
@@ -999,6 +1008,12 @@ r300_texture_create_object(struct r300_screen *rscreen,
         if (!tex->buf) {
             goto fail;
         }
+    }
+
+    if (SCREEN_DBG_ON(rscreen, DBG_MSAA) && base->nr_samples > 1) {
+        fprintf(stderr, "r300: %ix MSAA %s buffer created\n",
+                base->nr_samples,
+                util_format_is_depth_or_stencil(base->format) ? "depth" : "color");
     }
 
     tex->cs_buf = rws->buffer_get_cs_handle(tex->buf);

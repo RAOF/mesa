@@ -825,6 +825,13 @@ void r300_mark_fb_state_dirty(struct r300_context *r300,
             r300->fb_state.size += 8;
     }
 
+    if (r300->cmask_in_use) {
+        r300->fb_state.size += 6;
+        if (r300->screen->caps.is_r500 && r300->screen->info.drm_minor >= 29) {
+            r300->fb_state.size += 3;
+        }
+    }
+
     /* The size of the rest of atoms stays the same. */
 }
 
@@ -832,14 +839,18 @@ static unsigned r300_get_num_samples(struct r300_context *r300)
 {
     struct pipe_framebuffer_state* fb =
             (struct pipe_framebuffer_state*)r300->fb_state.state;
-    unsigned num_samples;
+    unsigned i, num_samples;
 
-    if (fb->nr_cbufs)
-        num_samples = fb->cbufs[0]->texture->nr_samples;
-    else if (fb->zsbuf)
-        num_samples = fb->zsbuf->texture->nr_samples;
-    else
-        num_samples = 1;
+    if (!fb->nr_cbufs && !fb->zsbuf)
+        return 1;
+
+    num_samples = 6;
+
+    for (i = 0; i < fb->nr_cbufs; i++)
+        num_samples = MIN2(num_samples, fb->cbufs[i]->texture->nr_samples);
+
+    if (fb->zsbuf)
+        num_samples = MIN2(num_samples, fb->zsbuf->texture->nr_samples);
 
     if (!num_samples)
         num_samples = 1;
@@ -899,6 +910,11 @@ r300_set_framebuffer_state(struct pipe_context* pipe,
         }
     }
     assert(state->zsbuf || (r300->locked_zbuffer && !unlock_zbuffer) || !r300->zmask_in_use);
+
+    /* Set whether CMASK can be used. */
+    r300->cmask_in_use =
+        state->nr_cbufs == 1 &&
+        r300->screen->cmask_resource == state->cbufs[0]->texture;
 
     /* Need to reset clamping or colormask. */
     r300_mark_atom_dirty(r300, &r300->blend_state);
@@ -1309,8 +1325,6 @@ static void r300_bind_rs_state(struct pipe_context* pipe, void* state)
     }
 
     if (last_msaa_enable != r300->msaa_enable) {
-        r300_mark_atom_dirty(r300, &r300->fb_state_pipelined);
-
         if (r300->alpha_to_coverage) {
             r300_mark_atom_dirty(r300, &r300->dsa_state);
         }

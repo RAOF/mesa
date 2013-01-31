@@ -650,7 +650,8 @@ static void si_delete_dsa_state(struct pipe_context *ctx, void *state)
 	si_pm4_delete_state(rctx, dsa, (struct si_state_dsa *)state);
 }
 
-static void *si_create_db_flush_dsa(struct r600_context *rctx)
+static void *si_create_db_flush_dsa(struct r600_context *rctx, bool copy_depth,
+				    bool copy_stencil)
 {
 	struct pipe_depth_stencil_alpha_state dsa;
         struct si_state_dsa *state;
@@ -658,10 +659,22 @@ static void *si_create_db_flush_dsa(struct r600_context *rctx)
 	memset(&dsa, 0, sizeof(dsa));
 
 	state = rctx->context.create_depth_stencil_alpha_state(&rctx->context, &dsa);
-	si_pm4_set_reg(&state->pm4, R_028000_DB_RENDER_CONTROL,
-		       S_028000_DEPTH_COPY(1) |
-		       S_028000_STENCIL_COPY(1) |
-		       S_028000_COPY_CENTROID(1));
+	if (copy_depth || copy_stencil) {
+		si_pm4_set_reg(&state->pm4, R_028000_DB_RENDER_CONTROL,
+			       S_028000_DEPTH_COPY(copy_depth) |
+			       S_028000_STENCIL_COPY(copy_stencil) |
+			       S_028000_COPY_CENTROID(1));
+	} else {
+		si_pm4_set_reg(&state->pm4, R_028000_DB_RENDER_CONTROL,
+			       S_028000_DEPTH_COMPRESS_DISABLE(1) |
+			       S_028000_STENCIL_COMPRESS_DISABLE(1));
+		si_pm4_set_reg(&state->pm4, R_02800C_DB_RENDER_OVERRIDE,
+			       S_02800C_FORCE_HIZ_ENABLE(V_02800C_FORCE_DISABLE) |
+			       S_02800C_FORCE_HIS_ENABLE0(V_02800C_FORCE_DISABLE) |
+			       S_02800C_FORCE_HIS_ENABLE1(V_02800C_FORCE_DISABLE) |
+			       S_02800C_DISABLE_TILE_RATE_TILES(1));
+	}
+
         return state;
 }
 
@@ -804,6 +817,8 @@ static uint32_t si_translate_colorformat(enum pipe_format format)
 		return V_028C70_COLOR_16_16_16_16;
 
 	case PIPE_FORMAT_L32A32_FLOAT:
+	case PIPE_FORMAT_L32A32_UINT:
+	case PIPE_FORMAT_L32A32_SINT:
 	case PIPE_FORMAT_R32G32_FLOAT:
 	case PIPE_FORMAT_R32G32_USCALED:
 	case PIPE_FORMAT_R32G32_SSCALED:
@@ -990,6 +1005,8 @@ static uint32_t si_translate_colorswap(enum pipe_format format)
 		return V_028C70_SWAP_STD;
 
 	case PIPE_FORMAT_L32A32_FLOAT:
+	case PIPE_FORMAT_L32A32_UINT:
+	case PIPE_FORMAT_L32A32_SINT:
 		return V_028C70_SWAP_ALT;
 
 	/* 128-bit buffers. */
@@ -1135,11 +1152,12 @@ static uint32_t si_translate_texformat(struct pipe_screen *screen,
 		case PIPE_FORMAT_X24S8_UINT:
 		case PIPE_FORMAT_Z24X8_UNORM:
 		case PIPE_FORMAT_Z24_UNORM_S8_UINT:
-			return V_008F14_IMG_DATA_FORMAT_24_8;
-		case PIPE_FORMAT_S8X24_UINT:
+			return V_008F14_IMG_DATA_FORMAT_8_24;
 		case PIPE_FORMAT_X8Z24_UNORM:
 		case PIPE_FORMAT_S8_UINT_Z24_UNORM:
-			return V_008F14_IMG_DATA_FORMAT_8_24;
+			return V_008F14_IMG_DATA_FORMAT_24_8;
+		case PIPE_FORMAT_X32_S8X24_UINT:
+		case PIPE_FORMAT_S8X24_UINT:
 		case PIPE_FORMAT_S8_UINT:
 			return V_008F14_IMG_DATA_FORMAT_8;
 		case PIPE_FORMAT_Z32_FLOAT:
@@ -1496,6 +1514,67 @@ boolean si_is_format_supported(struct pipe_screen *screen,
 	return retval == usage;
 }
 
+static unsigned si_tile_mode_index(struct r600_resource_texture *rtex, unsigned level)
+{
+	if (util_format_is_depth_or_stencil(rtex->real_format)) {
+		if (rtex->surface.level[level].mode == RADEON_SURF_MODE_1D) {
+			return 4;
+		} else if (rtex->surface.level[level].mode == RADEON_SURF_MODE_2D) {
+			switch (rtex->real_format) {
+			case PIPE_FORMAT_Z16_UNORM:
+				return 5;
+			case PIPE_FORMAT_Z24X8_UNORM:
+			case PIPE_FORMAT_Z24_UNORM_S8_UINT:
+			case PIPE_FORMAT_Z32_FLOAT:
+			case PIPE_FORMAT_Z32_FLOAT_S8X24_UINT:
+				return 6;
+			default:
+				return 7;
+			}
+		}
+	}
+
+	switch (rtex->surface.level[level].mode) {
+	default:
+		assert(!"Invalid surface mode");
+		/* Fall through */
+	case RADEON_SURF_MODE_LINEAR_ALIGNED:
+		return 8;
+	case RADEON_SURF_MODE_1D:
+		if (rtex->surface.flags & RADEON_SURF_SCANOUT)
+			return 9;
+		else
+			return 13;
+	case RADEON_SURF_MODE_2D:
+		if (rtex->surface.flags & RADEON_SURF_SCANOUT) {
+			switch (util_format_get_blocksize(rtex->real_format)) {
+			case 1:
+				return 10;
+			case 2:
+				return 11;
+			default:
+				assert(!"Invalid block size");
+				/* Fall through */
+			case 4:
+				return 12;
+			}
+		} else {
+			switch (util_format_get_blocksize(rtex->real_format)) {
+			case 1:
+				return 14;
+			case 2:
+				return 15;
+			case 4:
+				return 16;
+			case 8:
+				return 17;
+			default:
+				return 13;
+			}
+		}
+	}
+}
+
 /*
  * framebuffer handling
  */
@@ -1507,10 +1586,10 @@ static void si_cb(struct r600_context *rctx, struct si_pm4_state *pm4,
 	struct r600_surface *surf;
 	unsigned level = state->cbufs[cb]->u.tex.level;
 	unsigned pitch, slice;
-	unsigned color_info, color_attrib;
+	unsigned color_info;
+	unsigned tile_mode_index;
 	unsigned format, swap, ntype, endian;
 	uint64_t offset;
-	unsigned blocksize;
 	const struct util_format_description *desc;
 	int i;
 	unsigned blend_clamp = 0, blend_bypass = 0;
@@ -1518,15 +1597,6 @@ static void si_cb(struct r600_context *rctx, struct si_pm4_state *pm4,
 
 	surf = (struct r600_surface *)state->cbufs[cb];
 	rtex = (struct r600_resource_texture*)state->cbufs[cb]->texture;
-	blocksize = util_format_get_blocksize(rtex->real_format);
-
-	if (rtex->depth)
-		rctx->have_depth_fb = TRUE;
-
-	if (rtex->depth && !rtex->is_flushing_texture) {
-	        r600_texture_depth_flush(&rctx->context, state->cbufs[cb]->texture, TRUE);
-		rtex = rtex->flushed_depth_texture;
-	}
 
 	offset = rtex->surface.level[level].offset;
 	if (rtex->surface.level[level].mode < RADEON_SURF_MODE_1D) {
@@ -1539,46 +1609,7 @@ static void si_cb(struct r600_context *rctx, struct si_pm4_state *pm4,
 		slice = slice - 1;
 	}
 
-	color_attrib = S_028C74_TILE_MODE_INDEX(8);
-	switch (rtex->surface.level[level].mode) {
-	case RADEON_SURF_MODE_LINEAR_ALIGNED:
-		color_attrib = S_028C74_TILE_MODE_INDEX(8);
-		break;
-	case RADEON_SURF_MODE_1D:
-		color_attrib = S_028C74_TILE_MODE_INDEX(9);
-		break;
-	case RADEON_SURF_MODE_2D:
-		if (rtex->resource.b.b.bind & PIPE_BIND_SCANOUT) {
-			switch (blocksize) {
-			case 1:
-				color_attrib = S_028C74_TILE_MODE_INDEX(10);
-				break;
-			case 2:
-				color_attrib = S_028C74_TILE_MODE_INDEX(11);
-				break;
-			case 4:
-				color_attrib = S_028C74_TILE_MODE_INDEX(12);
-				break;
-			}
-			break;
-		} else switch (blocksize) {
-		case 1:
-			color_attrib = S_028C74_TILE_MODE_INDEX(14);
-			break;
-		case 2:
-			color_attrib = S_028C74_TILE_MODE_INDEX(15);
-			break;
-		case 4:
-			color_attrib = S_028C74_TILE_MODE_INDEX(16);
-			break;
-		case 8:
-			color_attrib = S_028C74_TILE_MODE_INDEX(17);
-			break;
-		default:
-			color_attrib = S_028C74_TILE_MODE_INDEX(13);
-		}
-		break;
-	}
+	tile_mode_index = si_tile_mode_index(rtex, level);
 
 	desc = util_format_description(surf->base.format);
 	for (i = 0; i < 4; i++) {
@@ -1586,7 +1617,7 @@ static void si_cb(struct r600_context *rctx, struct si_pm4_state *pm4,
 			break;
 		}
 	}
-	if (desc->channel[i].type == UTIL_FORMAT_TYPE_FLOAT) {
+	if (i == 4 || desc->channel[i].type == UTIL_FORMAT_TYPE_FLOAT) {
 		ntype = V_028C70_NUMBER_FLOAT;
 	} else {
 		ntype = V_028C70_NUMBER_UNORM;
@@ -1656,7 +1687,8 @@ static void si_cb(struct r600_context *rctx, struct si_pm4_state *pm4,
 			       S_028C6C_SLICE_MAX(state->cbufs[cb]->u.tex.last_layer));
 	}
 	si_pm4_set_reg(pm4, R_028C70_CB_COLOR0_INFO + cb * 0x3C, color_info);
-	si_pm4_set_reg(pm4, R_028C74_CB_COLOR0_ATTRIB + cb * 0x3C, color_attrib);
+	si_pm4_set_reg(pm4, R_028C74_CB_COLOR0_ATTRIB + cb * 0x3C,
+		       S_028C74_TILE_MODE_INDEX(tile_mode_index));
 
 	/* Determine pixel shader export format */
 	max_comp_size = si_colorformat_max_comp_size(format);
@@ -1665,9 +1697,7 @@ static void si_cb(struct r600_context *rctx, struct si_pm4_state *pm4,
 	     max_comp_size <= 10) ||
 	    (ntype == V_028C70_NUMBER_FLOAT && max_comp_size <= 16)) {
 		rctx->export_16bpc |= 1 << cb;
-		rctx->spi_shader_col_format |= V_028714_SPI_SHADER_FP16_ABGR << (4 * cb);
-	} else
-		rctx->spi_shader_col_format |= V_028714_SPI_SHADER_32_ABGR << (4 * cb);
+	}
 }
 
 static void si_db(struct r600_context *rctx, struct si_pm4_state *pm4,
@@ -1675,7 +1705,7 @@ static void si_db(struct r600_context *rctx, struct si_pm4_state *pm4,
 {
 	struct r600_resource_texture *rtex;
 	struct r600_surface *surf;
-	unsigned level, pitch, slice, format;
+	unsigned level, pitch, slice, format, tile_mode_index;
 	uint32_t z_info, s_info;
 	uint64_t z_offs, s_offs;
 
@@ -1715,33 +1745,16 @@ static void si_db(struct r600_context *rctx, struct si_pm4_state *pm4,
 	else
 		s_info = S_028044_FORMAT(V_028044_STENCIL_INVALID);
 
-	if (rtex->surface.level[level].mode == RADEON_SURF_MODE_1D) {
-		z_info |= S_028040_TILE_MODE_INDEX(4);
-		s_info |= S_028044_TILE_MODE_INDEX(4);
-
-	} else if (rtex->surface.level[level].mode == RADEON_SURF_MODE_2D) {
-		switch (format) {
-		case V_028040_Z_16:
-			z_info |= S_028040_TILE_MODE_INDEX(5);
-			s_info |= S_028044_TILE_MODE_INDEX(5);
-			break;
-		case V_028040_Z_24:
-		case V_028040_Z_32_FLOAT:
-			z_info |= S_028040_TILE_MODE_INDEX(6);
-			s_info |= S_028044_TILE_MODE_INDEX(6);
-			break;
-		default:
-			z_info |= S_028040_TILE_MODE_INDEX(7);
-			s_info |= S_028044_TILE_MODE_INDEX(7);
-		}
-
-	} else {
+	tile_mode_index = si_tile_mode_index(rtex, level);
+	if (tile_mode_index < 4 || tile_mode_index > 7) {
 		R600_ERR("Invalid DB tiling mode %d!\n",
-			 rtex->surface.level[level].mode);
+				 rtex->surface.level[level].mode);
 		si_pm4_set_reg(pm4, R_028040_DB_Z_INFO, S_028040_FORMAT(V_028040_Z_INVALID));
 		si_pm4_set_reg(pm4, R_028044_DB_STENCIL_INFO, S_028044_FORMAT(V_028044_STENCIL_INVALID));
 		return;
 	}
+	z_info |= S_028040_TILE_MODE_INDEX(tile_mode_index);
+	s_info |= S_028044_TILE_MODE_INDEX(tile_mode_index);
 
 	si_pm4_set_reg(pm4, R_028008_DB_DEPTH_VIEW,
 		       S_028008_SLICE_START(state->zsbuf->u.tex.first_layer) |
@@ -1780,9 +1793,7 @@ static void si_set_framebuffer_state(struct pipe_context *ctx,
 	util_copy_framebuffer_state(&rctx->framebuffer, state);
 
 	/* build states */
-	rctx->have_depth_fb = 0;
 	rctx->export_16bpc = 0;
-	rctx->spi_shader_col_format = 0;
 	for (int i = 0; i < state->nr_cbufs; i++) {
 		si_cb(rctx, pm4, state, i);
 	}
@@ -1812,8 +1823,6 @@ static void si_set_framebuffer_state(struct pipe_context *ctx,
 	si_pm4_set_reg(pm4, R_028200_PA_SC_WINDOW_OFFSET, 0x00000000);
 	si_pm4_set_reg(pm4, R_028230_PA_SC_EDGERULE, 0xAAAAAAAA);
 	si_pm4_set_reg(pm4, R_02823C_CB_SHADER_MASK, shader_mask);
-	si_pm4_set_reg(pm4, R_028714_SPI_SHADER_COL_FORMAT,
-		       rctx->spi_shader_col_format);
 	si_pm4_set_reg(pm4, R_028BE0_PA_SC_AA_CONFIG, 0x00000000);
 
 	si_pm4_set_state(rctx, framebuffer, pm4);
@@ -2038,12 +2047,12 @@ static struct pipe_sampler_view *si_create_sampler_view(struct pipe_context *ctx
 {
 	struct si_pipe_sampler_view *view = CALLOC_STRUCT(si_pipe_sampler_view);
 	struct r600_resource_texture *tmp = (struct r600_resource_texture*)texture;
-	const struct util_format_description *desc = util_format_description(state->format);
-	unsigned blocksize = util_format_get_blocksize(tmp->real_format);
-	unsigned format, num_format, /*endian,*/ tiling_index;
+	const struct util_format_description *desc;
+	unsigned format, num_format;
 	uint32_t pitch = 0;
 	unsigned char state_swizzle[4], swizzle[4];
 	unsigned height, depth, width;
+	enum pipe_format pipe_format = state->format;
 	int first_non_void;
 	uint64_t va;
 
@@ -2062,10 +2071,29 @@ static struct pipe_sampler_view *si_create_sampler_view(struct pipe_context *ctx
 	state_swizzle[1] = state->swizzle_g;
 	state_swizzle[2] = state->swizzle_b;
 	state_swizzle[3] = state->swizzle_a;
+
+	/* Texturing with separate depth and stencil. */
+	if (tmp->is_depth && !tmp->is_flushing_texture) {
+		switch (pipe_format) {
+		case PIPE_FORMAT_Z32_FLOAT_S8X24_UINT:
+			pipe_format = PIPE_FORMAT_Z32_FLOAT;
+			break;
+		case PIPE_FORMAT_X24S8_UINT:
+		case PIPE_FORMAT_S8X24_UINT:
+		case PIPE_FORMAT_X32_S8X24_UINT:
+			pipe_format = PIPE_FORMAT_S8_UINT;
+			break;
+		default:;
+		}
+	}
+
+	desc = util_format_description(pipe_format);
 	util_format_compose_swizzles(desc->swizzle, state_swizzle, swizzle);
 
-	first_non_void = util_format_get_first_non_void_channel(state->format);
-	switch (desc->channel[first_non_void].type) {
+	first_non_void = util_format_get_first_non_void_channel(pipe_format);
+	if (first_non_void < 0) {
+		num_format = V_008F14_IMG_NUM_FORMAT_FLOAT;
+	} else switch (desc->channel[first_non_void].type) {
 	case UTIL_FORMAT_TYPE_FLOAT:
 		num_format = V_008F14_IMG_NUM_FORMAT_FLOAT;
 		break;
@@ -2077,15 +2105,9 @@ static struct pipe_sampler_view *si_create_sampler_view(struct pipe_context *ctx
 		num_format = V_008F14_IMG_NUM_FORMAT_UNORM;
 	}
 
-	format = si_translate_texformat(ctx->screen, state->format, desc, first_non_void);
+	format = si_translate_texformat(ctx->screen, pipe_format, desc, first_non_void);
 	if (format == ~0) {
 		format = 0;
-	}
-
-	if (tmp->depth && !tmp->is_flushing_texture) {
-		r600_texture_depth_flush(ctx, texture, TRUE);
-		tmp = tmp->flushed_depth_texture;
-		texture = &tmp->resource.b.b;
 	}
 
 	view->resource = &tmp->resource;
@@ -2096,54 +2118,13 @@ static struct pipe_sampler_view *si_create_sampler_view(struct pipe_context *ctx
 	width = tmp->surface.level[0].npix_x;
 	height = tmp->surface.level[0].npix_y;
 	depth = tmp->surface.level[0].npix_z;
-	pitch = tmp->surface.level[0].nblk_x * util_format_get_blockwidth(state->format);
+	pitch = tmp->surface.level[0].nblk_x * util_format_get_blockwidth(pipe_format);
 
 	if (texture->target == PIPE_TEXTURE_1D_ARRAY) {
 	        height = 1;
 		depth = texture->array_size;
 	} else if (texture->target == PIPE_TEXTURE_2D_ARRAY) {
 		depth = texture->array_size;
-	}
-
-	tiling_index = 8;
-	switch (tmp->surface.level[0].mode) {
-	case RADEON_SURF_MODE_LINEAR_ALIGNED:
-		tiling_index = 8;
-		break;
-	case RADEON_SURF_MODE_1D:
-		tiling_index = 9;
-		break;
-	case RADEON_SURF_MODE_2D:
-		if (tmp->resource.b.b.bind & PIPE_BIND_SCANOUT) {
-			switch (blocksize) {
-			case 1:
-				tiling_index = 10;
-				break;
-			case 2:
-				tiling_index = 11;
-				break;
-			case 4:
-				tiling_index = 12;
-				break;
-			}
-			break;
-		} else switch (blocksize) {
-		case 1:
-			tiling_index = 14;
-			break;
-		case 2:
-			tiling_index = 15;
-			break;
-		case 4:
-			tiling_index = 16;
-			break;
-		case 8:
-			tiling_index = 17;
-			break;
-		default:
-			tiling_index = 13;
-		}
-		break;
 	}
 
 	va = r600_resource_va(ctx->screen, texture);
@@ -2160,7 +2141,7 @@ static struct pipe_sampler_view *si_create_sampler_view(struct pipe_context *ctx
 			  S_008F1C_DST_SEL_W(si_map_swizzle(swizzle[3])) |
 			  S_008F1C_BASE_LEVEL(state->u.tex.first_level) |
 			  S_008F1C_LAST_LEVEL(state->u.tex.last_level) |
-			  S_008F1C_TILING_INDEX(tiling_index) |
+			  S_008F1C_TILING_INDEX(si_tile_mode_index(tmp, 0)) |
 			  S_008F1C_POW2_PAD(texture->last_level > 0) |
 			  S_008F1C_TYPE(si_tex_dim(texture->target)));
 	view->state[4] = (S_008F20_DEPTH(depth - 1) | S_008F20_PITCH(pitch - 1));
@@ -2241,7 +2222,6 @@ static struct si_pm4_state *si_set_sampler_view(struct r600_context *rctx,
 	struct si_pipe_sampler_view **resource = (struct si_pipe_sampler_view **)views;
 	struct si_pm4_state *pm4 = CALLOC_STRUCT(si_pm4_state);
 	int i, j;
-	int has_depth = 0;
 
 	if (!count)
 		goto out;
@@ -2254,8 +2234,20 @@ static struct si_pm4_state *si_set_sampler_view(struct r600_context *rctx,
 			(struct pipe_sampler_view **)&samplers->views[i],
 			views[i]);
 
-		if (views[i])
+		if (views[i]) {
+			struct r600_resource_texture *rtex =
+				(struct r600_resource_texture*)views[i]->texture;
+
+			if (rtex->is_depth && !rtex->is_flushing_texture) {
+				samplers->depth_texture_mask |= 1 << i;
+			} else {
+				samplers->depth_texture_mask &= ~(1 << i);
+			}
+
 			si_pm4_add_bo(pm4, resource[i]->resource, RADEON_USAGE_READ);
+		} else {
+			samplers->depth_texture_mask &= ~(1 << i);
+		}
 
 		for (j = 0; j < Elements(resource[i]->state); ++j) {
 			si_pm4_sh_data_add(pm4, resource[i] ? resource[i]->state[j] : 0);
@@ -2270,7 +2262,6 @@ static struct si_pm4_state *si_set_sampler_view(struct r600_context *rctx,
 	si_pm4_sh_data_end(pm4, user_data_reg, SI_SGPR_RESOURCE);
 
 out:
-	rctx->have_depth_texture = has_depth;
 	rctx->ps_samplers.n_views = count;
 	return pm4;
 }
@@ -2577,7 +2568,10 @@ void si_init_state_functions(struct r600_context *rctx)
 	rctx->context.create_depth_stencil_alpha_state = si_create_dsa_state;
 	rctx->context.bind_depth_stencil_alpha_state = si_bind_dsa_state;
 	rctx->context.delete_depth_stencil_alpha_state = si_delete_dsa_state;
-	rctx->custom_dsa_flush = si_create_db_flush_dsa(rctx);
+	rctx->custom_dsa_flush_depth_stencil = si_create_db_flush_dsa(rctx, true, true);
+	rctx->custom_dsa_flush_depth = si_create_db_flush_dsa(rctx, true, false);
+	rctx->custom_dsa_flush_stencil = si_create_db_flush_dsa(rctx, false, true);
+	rctx->custom_dsa_flush_inplace = si_create_db_flush_dsa(rctx, false, false);
 
 	rctx->context.set_clip_state = si_set_clip_state;
 	rctx->context.set_scissor_state = si_set_scissor_state;

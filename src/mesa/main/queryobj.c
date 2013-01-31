@@ -50,7 +50,20 @@ _mesa_new_query_object(struct gl_context *ctx, GLuint id)
       q->Id = id;
       q->Result = 0;
       q->Active = GL_FALSE;
-      q->Ready = GL_TRUE;   /* correct, see spec */
+
+      /* This is to satisfy the language of the specification: "In the initial
+       * state of a query object, the result is available" (OpenGL 3.1 §
+       * 2.13).
+       */
+      q->Ready = GL_TRUE;
+
+      /* OpenGL 3.1 § 2.13 says about GenQueries, "These names are marked as
+       * used, but no object is associated with them until the first time they
+       * are used by BeginQuery." Since our implementation actually does
+       * allocate an object at this point, use a flag to indicate that this
+       * object has not yet been bound so should not be considered a query.
+       */
+      q->EverBound = GL_FALSE;
    }
    return q;
 }
@@ -147,6 +160,12 @@ get_query_binding_point(struct gl_context *ctx, GLenum target)
          return &ctx->Query.CurrentOcclusionObject;
       else
          return NULL;
+   case GL_ANY_SAMPLES_PASSED_CONSERVATIVE:
+      if (ctx->Extensions.ARB_ES3_compatibility
+          || (ctx->API == API_OPENGLES2 && ctx->Version >= 30))
+         return &ctx->Query.CurrentOcclusionObject;
+      else
+         return NULL;
    case GL_TIME_ELAPSED_EXT:
       if (ctx->Extensions.EXT_timer_query)
          return &ctx->Query.CurrentTimerObject;
@@ -173,7 +192,6 @@ _mesa_GenQueries(GLsizei n, GLuint *ids)
 {
    GLuint first;
    GET_CURRENT_CONTEXT(ctx);
-   ASSERT_OUTSIDE_BEGIN_END(ctx);
 
    if (MESA_VERBOSE & VERBOSE_API)
       _mesa_debug(ctx, "glGenQueries(%d)\n", n);
@@ -212,7 +230,6 @@ _mesa_DeleteQueries(GLsizei n, const GLuint *ids)
 {
    GLint i;
    GET_CURRENT_CONTEXT(ctx);
-   ASSERT_OUTSIDE_BEGIN_END(ctx);
    FLUSH_VERTICES(ctx, 0);
 
    if (MESA_VERBOSE & VERBOSE_API)
@@ -246,16 +263,22 @@ _mesa_DeleteQueries(GLsizei n, const GLuint *ids)
 GLboolean GLAPIENTRY
 _mesa_IsQuery(GLuint id)
 {
+   struct gl_query_object *q;
+
    GET_CURRENT_CONTEXT(ctx);
    ASSERT_OUTSIDE_BEGIN_END_WITH_RETVAL(ctx, GL_FALSE);
 
    if (MESA_VERBOSE & VERBOSE_API)
       _mesa_debug(ctx, "glIsQuery(%u)\n", id);
 
-   if (id && _mesa_lookup_query_object(ctx, id))
-      return GL_TRUE;
-   else
+   if (id == 0)
       return GL_FALSE;
+
+   q = _mesa_lookup_query_object(ctx, id);
+   if (q == NULL)
+      return GL_FALSE;
+
+   return q->EverBound;
 }
 
 static GLboolean
@@ -284,7 +307,6 @@ _mesa_BeginQueryIndexed(GLenum target, GLuint index, GLuint id)
 {
    struct gl_query_object *q, **bindpt;
    GET_CURRENT_CONTEXT(ctx);
-   ASSERT_OUTSIDE_BEGIN_END(ctx);
 
    if (MESA_VERBOSE & VERBOSE_API)
       _mesa_debug(ctx, "glBeginQueryIndexed(%s, %u, %u)\n",
@@ -348,6 +370,7 @@ _mesa_BeginQueryIndexed(GLenum target, GLuint index, GLuint id)
    q->Active = GL_TRUE;
    q->Result = 0;
    q->Ready = GL_FALSE;
+   q->EverBound = GL_TRUE;
 
    /* XXX should probably refcount query objects */
    *bindpt = q;
@@ -361,7 +384,6 @@ _mesa_EndQueryIndexed(GLenum target, GLuint index)
 {
    struct gl_query_object *q, **bindpt;
    GET_CURRENT_CONTEXT(ctx);
-   ASSERT_OUTSIDE_BEGIN_END(ctx);
 
    if (MESA_VERBOSE & VERBOSE_API)
       _mesa_debug(ctx, "glEndQueryIndexed(%s, %u)\n",
@@ -419,7 +441,6 @@ _mesa_QueryCounter(GLuint id, GLenum target)
 {
    struct gl_query_object *q;
    GET_CURRENT_CONTEXT(ctx);
-   ASSERT_OUTSIDE_BEGIN_END(ctx);
 
    if (MESA_VERBOSE & VERBOSE_API)
       _mesa_debug(ctx, "glQueryCounter(%u, %s)\n", id,
@@ -477,7 +498,6 @@ _mesa_GetQueryIndexediv(GLenum target, GLuint index, GLenum pname,
 {
    struct gl_query_object *q = NULL, **bindpt = NULL;
    GET_CURRENT_CONTEXT(ctx);
-   ASSERT_OUTSIDE_BEGIN_END(ctx);
 
    if (MESA_VERBOSE & VERBOSE_API)
       _mesa_debug(ctx, "glGetQueryIndexediv(%s, %u, %s)\n",
@@ -557,7 +577,6 @@ _mesa_GetQueryObjectiv(GLuint id, GLenum pname, GLint *params)
 {
    struct gl_query_object *q = NULL;
    GET_CURRENT_CONTEXT(ctx);
-   ASSERT_OUTSIDE_BEGIN_END(ctx);
 
    if (MESA_VERBOSE & VERBOSE_API)
       _mesa_debug(ctx, "glGetQueryObjectiv(%u, %s)\n", id,
@@ -577,7 +596,8 @@ _mesa_GetQueryObjectiv(GLuint id, GLenum pname, GLint *params)
          if (!q->Ready)
             ctx->Driver.WaitQuery(ctx, q);
          /* if result is too large for returned type, clamp to max value */
-         if (q->Target == GL_ANY_SAMPLES_PASSED) {
+         if (q->Target == GL_ANY_SAMPLES_PASSED
+             || q->Target == GL_ANY_SAMPLES_PASSED_CONSERVATIVE) {
             if (q->Result)
                *params = GL_TRUE;
             else
@@ -608,7 +628,6 @@ _mesa_GetQueryObjectuiv(GLuint id, GLenum pname, GLuint *params)
 {
    struct gl_query_object *q = NULL;
    GET_CURRENT_CONTEXT(ctx);
-   ASSERT_OUTSIDE_BEGIN_END(ctx);
 
    if (MESA_VERBOSE & VERBOSE_API)
       _mesa_debug(ctx, "glGetQueryObjectuiv(%u, %s)\n", id,
@@ -628,7 +647,8 @@ _mesa_GetQueryObjectuiv(GLuint id, GLenum pname, GLuint *params)
          if (!q->Ready)
             ctx->Driver.WaitQuery(ctx, q);
          /* if result is too large for returned type, clamp to max value */
-         if (q->Target == GL_ANY_SAMPLES_PASSED) {
+         if (q->Target == GL_ANY_SAMPLES_PASSED
+             || q->Target == GL_ANY_SAMPLES_PASSED_CONSERVATIVE) {
             if (q->Result)
                *params = GL_TRUE;
             else
@@ -662,7 +682,6 @@ _mesa_GetQueryObjecti64v(GLuint id, GLenum pname, GLint64EXT *params)
 {
    struct gl_query_object *q = NULL;
    GET_CURRENT_CONTEXT(ctx);
-   ASSERT_OUTSIDE_BEGIN_END(ctx);
 
    if (MESA_VERBOSE & VERBOSE_API)
       _mesa_debug(ctx, "glGetQueryObjecti64v(%u, %s)\n", id,
@@ -703,7 +722,6 @@ _mesa_GetQueryObjectui64v(GLuint id, GLenum pname, GLuint64EXT *params)
 {
    struct gl_query_object *q = NULL;
    GET_CURRENT_CONTEXT(ctx);
-   ASSERT_OUTSIDE_BEGIN_END(ctx);
 
    if (MESA_VERBOSE & VERBOSE_API)
       _mesa_debug(ctx, "glGetQueryObjectui64v(%u, %s)\n", id,
@@ -734,33 +752,6 @@ _mesa_GetQueryObjectui64v(GLuint id, GLenum pname, GLuint64EXT *params)
          return;
    }
 }
-
-
-void
-_mesa_init_queryobj_dispatch(const struct gl_context *ctx,
-                             struct _glapi_table *disp)
-{
-   SET_GenQueries(disp, _mesa_GenQueries);
-   SET_DeleteQueries(disp, _mesa_DeleteQueries);
-   SET_IsQuery(disp, _mesa_IsQuery);
-   SET_BeginQuery(disp, _mesa_BeginQuery);
-   SET_EndQuery(disp, _mesa_EndQuery);
-   SET_GetQueryiv(disp, _mesa_GetQueryiv);
-   SET_GetQueryObjectuiv(disp, _mesa_GetQueryObjectuiv);
-
-   if (_mesa_is_desktop_gl(ctx)) {
-      SET_GetQueryObjectiv(disp, _mesa_GetQueryObjectiv);
-      SET_QueryCounter(disp, _mesa_QueryCounter);
-
-      SET_GetQueryObjecti64v(disp, _mesa_GetQueryObjecti64v);
-      SET_GetQueryObjectui64v(disp, _mesa_GetQueryObjectui64v);
-
-      SET_BeginQueryIndexed(disp, _mesa_BeginQueryIndexed);
-      SET_EndQueryIndexed(disp, _mesa_EndQueryIndexed);
-      SET_GetQueryIndexediv(disp, _mesa_GetQueryIndexediv);
-   }
-}
-
 
 /**
  * Allocate/init the context state related to query objects.

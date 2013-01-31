@@ -204,7 +204,6 @@ _mesa_PushAttrib(GLbitfield mask)
    struct gl_attrib_node *head;
 
    GET_CURRENT_CONTEXT(ctx);
-   ASSERT_OUTSIDE_BEGIN_END(ctx);
 
    if (MESA_VERBOSE & VERBOSE_API)
       _mesa_debug(ctx, "glPushAttrib %x\n", (int) mask);
@@ -831,7 +830,7 @@ _mesa_PopAttrib(void)
 {
    struct gl_attrib_node *attr, *next;
    GET_CURRENT_CONTEXT(ctx);
-   ASSERT_OUTSIDE_BEGIN_END_AND_FLUSH(ctx);
+   FLUSH_VERTICES(ctx, 0);
 
    if (ctx->AttribStackDepth == 0) {
       _mesa_error( ctx, GL_STACK_UNDERFLOW, "glPopAttrib" );
@@ -1377,7 +1376,10 @@ copy_array_attrib(struct gl_context *ctx,
    dest->LockFirst = src->LockFirst;
    dest->LockCount = src->LockCount;
    dest->PrimitiveRestart = src->PrimitiveRestart;
+   dest->PrimitiveRestartFixedIndex = src->PrimitiveRestartFixedIndex;
+   dest->_PrimitiveRestart = src->_PrimitiveRestart;
    dest->RestartIndex = src->RestartIndex;
+   dest->_RestartIndex = src->_RestartIndex;
    /* skip NewState */
    /* skip RebindArrays */
 
@@ -1493,7 +1495,6 @@ _mesa_PushClientAttrib(GLbitfield mask)
    struct gl_attrib_node *head;
 
    GET_CURRENT_CONTEXT(ctx);
-   ASSERT_OUTSIDE_BEGIN_END(ctx);
 
    if (ctx->ClientAttribStackDepth >= MAX_CLIENT_ATTRIB_STACK_DEPTH) {
       _mesa_error( ctx, GL_STACK_OVERFLOW, "glPushClientAttrib" );
@@ -1538,7 +1539,7 @@ _mesa_PopClientAttrib(void)
    struct gl_attrib_node *node, *next;
 
    GET_CURRENT_CONTEXT(ctx);
-   ASSERT_OUTSIDE_BEGIN_END_AND_FLUSH(ctx);
+   FLUSH_VERTICES(ctx, 0);
 
    if (ctx->ClientAttribStackDepth == 0) {
       _mesa_error( ctx, GL_STACK_UNDERFLOW, "glPopClientAttrib" );

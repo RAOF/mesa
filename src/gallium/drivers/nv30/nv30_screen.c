@@ -74,7 +74,6 @@ nv30_screen_get_param(struct pipe_screen *pscreen, enum pipe_cap param)
    case PIPE_CAP_QUERY_TIMESTAMP:
    case PIPE_CAP_TEXTURE_SHADOW_MAP:
    case PIPE_CAP_TEXTURE_SWIZZLE:
-   case PIPE_CAP_DEPTHSTENCIL_CLEAR_SEPARATE:
    case PIPE_CAP_DEPTH_CLIP_DISABLE:
    case PIPE_CAP_TGSI_FS_COORD_ORIGIN_UPPER_LEFT:
    case PIPE_CAP_TGSI_FS_COORD_ORIGIN_LOWER_LEFT:
@@ -245,6 +244,8 @@ nv30_screen_is_format_supported(struct pipe_screen *pscreen,
                                 unsigned sample_count,
                                 unsigned bindings)
 {
+   if (sample_count > 4)
+      return FALSE;
    if (!(0x00000017 & (1 << sample_count)))
       return FALSE;
 

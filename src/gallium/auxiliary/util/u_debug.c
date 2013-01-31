@@ -232,7 +232,7 @@ debug_get_flags_option(const char *name,
    unsigned long result;
    const char *str;
    const struct debug_named_value *orig = flags;
-   int namealign = 0;
+   unsigned namealign = 0;
    
    str = os_get_option(name);
    if(!str)
@@ -386,6 +386,10 @@ static const struct debug_named_value pipe_prim_names[] = {
    DEBUG_NAMED_VALUE(PIPE_PRIM_QUADS),
    DEBUG_NAMED_VALUE(PIPE_PRIM_QUAD_STRIP),
    DEBUG_NAMED_VALUE(PIPE_PRIM_POLYGON),
+   DEBUG_NAMED_VALUE(PIPE_PRIM_LINES_ADJACENCY),
+   DEBUG_NAMED_VALUE(PIPE_PRIM_LINE_STRIP_ADJACENCY),
+   DEBUG_NAMED_VALUE(PIPE_PRIM_TRIANGLES_ADJACENCY),
+   DEBUG_NAMED_VALUE(PIPE_PRIM_TRIANGLE_STRIP_ADJACENCY),
 #endif
    DEBUG_NAMED_VALUE_END
 };

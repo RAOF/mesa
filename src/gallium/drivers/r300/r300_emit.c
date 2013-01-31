@@ -102,7 +102,7 @@ void r300_emit_dsa_state(struct r300_context* r300, unsigned size, void* state)
 
     BEGIN_CS(size);
     OUT_CS_REG(R300_FG_ALPHA_FUNC, alpha_func);
-    OUT_CS_TABLE(fb->zsbuf ? &dsa->cb_begin : dsa->cb_zb_no_readwrite, 8);
+    OUT_CS_TABLE(fb->zsbuf ? &dsa->cb_begin : dsa->cb_zb_no_readwrite, size-2);
     END_CS;
 }
 
@@ -399,13 +399,16 @@ void r300_emit_fb_state(struct r300_context* r300, unsigned size, void* state)
 
     BEGIN_CS(size);
 
-    /* NUM_MULTIWRITES replicates COLOR[0] to all colorbuffers, which is not
-     * what we usually want. */
     if (r300->screen->caps.is_r500) {
         rb3d_cctl = R300_RB3D_CCTL_INDEPENDENT_COLORFORMAT_ENABLE_ENABLE;
     }
+    /* NUM_MULTIWRITES replicates COLOR[0] to all colorbuffers. */
     if (fb->nr_cbufs && r300->fb_multiwrite) {
         rb3d_cctl |= R300_RB3D_CCTL_NUM_MULTIWRITES(fb->nr_cbufs);
+    }
+    if (r300->cmask_in_use) {
+        rb3d_cctl |= R300_RB3D_CCTL_AA_COMPRESSION_ENABLE |
+                     R300_RB3D_CCTL_CMASK_ENABLE;
     }
 
     OUT_CS_REG(R300_RB3D_CCTL, rb3d_cctl);
@@ -419,6 +422,17 @@ void r300_emit_fb_state(struct r300_context* r300, unsigned size, void* state)
 
         OUT_CS_REG(R300_RB3D_COLORPITCH0 + (4 * i), surf->pitch);
         OUT_CS_RELOC(surf);
+
+        if (r300->cmask_in_use && i == 0) {
+            OUT_CS_REG(R300_RB3D_CMASK_OFFSET0, 0);
+            OUT_CS_REG(R300_RB3D_CMASK_PITCH0, surf->pitch_cmask);
+            OUT_CS_REG(R300_RB3D_COLOR_CLEAR_VALUE, r300->color_clear_value);
+            if (r300->screen->caps.is_r500 && r300->screen->info.drm_minor >= 29) {
+                OUT_CS_REG_SEQ(R500_RB3D_COLOR_CLEAR_VALUE_AR, 2);
+                OUT_CS(r300->color_clear_value_ar);
+                OUT_CS(r300->color_clear_value_gb);
+            }
+        }
     }
 
     /* Set up the ZB part of the CBZB clear. */
@@ -566,7 +580,7 @@ void r300_emit_fb_state_pipelined(struct r300_context *r300,
 
     struct pipe_framebuffer_state* fb =
             (struct pipe_framebuffer_state*)r300->fb_state.state;
-    unsigned i, num_samples, num_cbufs = fb->nr_cbufs;
+    unsigned i, num_cbufs = fb->nr_cbufs;
     unsigned mspos0, mspos1;
     CS_LOCALS(r300);
 
@@ -593,14 +607,10 @@ void r300_emit_fb_state_pipelined(struct r300_context *r300,
         OUT_CS(R300_US_OUT_FMT_UNUSED);
     }
 
-    /* Multisampling. Depends on framebuffer sample count.
-     * These are pipelined regs and as such cannot be moved
-     * to the AA state.
+    /* Set sample positions. It depends on the framebuffer sample count.
+     * These are pipelined regs and as such cannot be moved to the AA state.
      */
-    num_samples = r300->msaa_enable ? r300->num_samples : 1;
-
-    /* Sample positions. */
-    switch (num_samples) {
+    switch (r300->num_samples) {
     default:
         mspos0 = r300_get_mspos(0, sample_locs_1x);
         mspos1 = r300_get_mspos(1, sample_locs_1x);
@@ -1205,9 +1215,6 @@ void r300_emit_hiz_clear(struct r300_context *r300, unsigned size, void *state)
     tex = r300_resource(fb->zsbuf->texture);
 
     BEGIN_CS(size);
-    OUT_CS_REG(R300_ZB_ZCACHE_CTLSTAT,
-        R300_ZB_ZCACHE_CTLSTAT_ZC_FLUSH_FLUSH_AND_FREE |
-        R300_ZB_ZCACHE_CTLSTAT_ZC_FREE_FREE);
     OUT_CS_PKT3(R300_PACKET3_3D_CLEAR_HIZ, 2);
     OUT_CS(0);
     OUT_CS(tex->tex.hiz_dwords[fb->zsbuf->u.tex.level]);
@@ -1230,9 +1237,6 @@ void r300_emit_zmask_clear(struct r300_context *r300, unsigned size, void *state
     tex = r300_resource(fb->zsbuf->texture);
 
     BEGIN_CS(size);
-    OUT_CS_REG(R300_ZB_ZCACHE_CTLSTAT,
-        R300_ZB_ZCACHE_CTLSTAT_ZC_FLUSH_FLUSH_AND_FREE |
-        R300_ZB_ZCACHE_CTLSTAT_ZC_FREE_FREE);
     OUT_CS_PKT3(R300_PACKET3_3D_CLEAR_ZMASK, 2);
     OUT_CS(0);
     OUT_CS(tex->tex.zmask_dwords[fb->zsbuf->u.tex.level]);
@@ -1242,6 +1246,27 @@ void r300_emit_zmask_clear(struct r300_context *r300, unsigned size, void *state
     /* Mark the current zbuffer's zmask as in use. */
     r300->zmask_in_use = TRUE;
     r300_mark_atom_dirty(r300, &r300->hyperz_state);
+}
+
+void r300_emit_cmask_clear(struct r300_context *r300, unsigned size, void *state)
+{
+    struct pipe_framebuffer_state *fb =
+        (struct pipe_framebuffer_state*)r300->fb_state.state;
+    struct r300_resource *tex;
+    CS_LOCALS(r300);
+
+    tex = r300_resource(fb->cbufs[0]->texture);
+
+    BEGIN_CS(size);
+    OUT_CS_PKT3(R300_PACKET3_3D_CLEAR_CMASK, 2);
+    OUT_CS(0);
+    OUT_CS(tex->tex.cmask_dwords);
+    OUT_CS(0);
+    END_CS;
+
+    /* Mark the current zbuffer's zmask as in use. */
+    r300->cmask_in_use = TRUE;
+    r300_mark_fb_state_dirty(r300, R300_CHANGED_CMASK_ENABLE);
 }
 
 void r300_emit_ztop_state(struct r300_context* r300,

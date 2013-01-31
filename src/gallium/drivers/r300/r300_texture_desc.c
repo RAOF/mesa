@@ -349,7 +349,6 @@ static void r300_setup_hyperz_properties(struct r300_screen *screen,
     static unsigned hiz_align_y[4] = {8, 8, 8, 32};
 
     if (util_format_is_depth_or_stencil(tex->b.b.format) &&
-        util_format_get_blocksizebits(tex->b.b.format) == 32 &&
         tex->tex.microtile) {
         unsigned i, pipes;
 
@@ -410,6 +409,54 @@ static void r300_setup_hyperz_properties(struct r300_screen *screen,
     }
 }
 
+static void r300_setup_cmask_properties(struct r300_screen *screen,
+                                        struct r300_resource *tex)
+{
+    static unsigned cmask_align_x[4] = {16, 32, 48, 32};
+    static unsigned cmask_align_y[4] = {16, 16, 16, 32};
+    unsigned pipes, stride, cmask_num_dw, cmask_max_size;
+
+    /* We need an AA colorbuffer, no mipmaps. */
+    if (tex->b.b.nr_samples <= 1 ||
+        tex->b.b.last_level > 0 ||
+        util_format_is_depth_or_stencil(tex->b.b.format)) {
+        return;
+    }
+
+    /* FP16 AA needs R500 and a fairly new DRM. */
+    if (tex->b.b.format == PIPE_FORMAT_R16G16B16A16_FLOAT &&
+        (!screen->caps.is_r500 || screen->info.drm_minor < 29)) {
+        return;
+    }
+
+    if (SCREEN_DBG_ON(screen, DBG_NO_CMASK)) {
+        return;
+    }
+
+    /* CMASK is part of raster pipes. The number of Z pipes doesn't matter. */
+    pipes = screen->info.r300_num_gb_pipes;
+
+    /* The single-pipe cards have 5120 dwords of CMASK RAM,
+     * the other cards have 4096 dwords of CMASK RAM per pipe. */
+    cmask_max_size = pipes == 1 ? 5120 : pipes * 4096;
+
+    stride = r300_stride_to_width(tex->b.b.format,
+                                  tex->tex.stride_in_bytes[0]);
+    stride = align(stride, 16);
+
+    /* Get the CMASK size in dwords. */
+    cmask_num_dw = r300_pixels_to_dwords(stride, tex->b.b.height0,
+                                         cmask_align_x[pipes-1],
+                                         cmask_align_y[pipes-1]);
+
+    /* Check the CMASK size against the CMASK memory limit. */
+    if (cmask_num_dw <= cmask_max_size) {
+        tex->tex.cmask_dwords = cmask_num_dw;
+        tex->tex.cmask_stride_in_pixels =
+            util_align_npot(stride, cmask_align_x[pipes-1]);
+    }
+}
+
 static void r300_setup_tiling(struct r300_screen *screen,
                               struct r300_resource *tex)
 {
@@ -417,6 +464,8 @@ static void r300_setup_tiling(struct r300_screen *screen,
     boolean rv350_mode = screen->caps.family >= CHIP_R350;
     boolean is_zb = util_format_is_depth_or_stencil(format);
     boolean dbg_no_tiling = SCREEN_DBG_ON(screen, DBG_NO_TILING);
+    boolean force_microtiling =
+        (tex->b.b.flags & R300_RESOURCE_FORCE_MICROTILING) != 0;
 
     if (tex->b.b.nr_samples > 1) {
         tex->tex.microtile = RADEON_LAYOUT_TILED;
@@ -432,7 +481,8 @@ static void r300_setup_tiling(struct r300_screen *screen,
     }
 
     /* If height == 1, disable microtiling except for zbuffer. */
-    if (!is_zb && (tex->b.b.height0 == 1 || dbg_no_tiling)) {
+    if (!force_microtiling && !is_zb &&
+        (tex->b.b.height0 == 1 || dbg_no_tiling)) {
         return;
     }
 
@@ -465,14 +515,15 @@ static void r300_tex_print_info(struct r300_resource *tex,
 {
     fprintf(stderr,
             "r300: %s: Macro: %s, Micro: %s, Pitch: %i, Dim: %ix%ix%i, "
-            "LastLevel: %i, Size: %i, Format: %s\n",
+            "LastLevel: %i, Size: %i, Format: %s, Samples: %i\n",
             func,
             tex->tex.macrotile[0] ? "YES" : " NO",
             tex->tex.microtile ? "YES" : " NO",
             r300_stride_to_width(tex->b.b.format, tex->tex.stride_in_bytes[0]),
             tex->b.b.width0, tex->b.b.height0, tex->b.b.depth0,
             tex->b.b.last_level, tex->tex.size_in_bytes,
-            util_format_short_name(tex->b.b.format));
+            util_format_short_name(tex->b.b.format),
+            tex->b.b.nr_samples);
 }
 
 void r300_texture_desc_init(struct r300_screen *rscreen,
@@ -490,6 +541,37 @@ void r300_texture_desc_init(struct r300_screen *rscreen,
     tex->tex.width0 = base->width0;
     tex->tex.height0 = base->height0;
     tex->tex.depth0 = base->depth0;
+
+    /* There is a CB memory addressing hardware bug that limits the width
+     * of the MSAA buffer in some cases in R520. In order to get around it,
+     * the following code lowers the sample count depending on the format and
+     * the width.
+     *
+     * The only catch is that all MSAA colorbuffers and a zbuffer which are
+     * supposed to be used together should always be bound together. Only
+     * then the correct minimum sample count of all bound buffers is used
+     * for rendering. */
+    if (rscreen->caps.is_r500) {
+        /* FP16 6x MSAA buffers are limited to a width of 1360 pixels. */
+        if (tex->b.b.format == PIPE_FORMAT_R16G16B16A16_FLOAT &&
+            tex->b.b.nr_samples == 6 && tex->b.b.width0 > 1360) {
+            tex->b.b.nr_samples = 4;
+        }
+
+        /* FP16 4x MSAA buffers are limited to a width of 2048 pixels. */
+        if (tex->b.b.format == PIPE_FORMAT_R16G16B16A16_FLOAT &&
+            tex->b.b.nr_samples == 4 && tex->b.b.width0 > 2048) {
+            tex->b.b.nr_samples = 2;
+        }
+    }
+
+    /* 32-bit 6x MSAA buffers are limited to a width of 2720 pixels.
+     * This applies to all R300-R500 cards. */
+    if (util_format_get_blocksizebits(tex->b.b.format) == 32 &&
+        !util_format_is_depth_or_stencil(tex->b.b.format) &&
+        tex->b.b.nr_samples == 6 && tex->b.b.width0 > 2720) {
+        tex->b.b.nr_samples = 4;
+    }
 
     r300_setup_flags(tex);
 
@@ -529,6 +611,7 @@ void r300_texture_desc_init(struct r300_screen *rscreen,
     }
 
     r300_setup_hyperz_properties(rscreen, tex);
+    r300_setup_cmask_properties(rscreen, tex);
 
     if (SCREEN_DBG_ON(rscreen, DBG_TEX))
         r300_tex_print_info(tex, "texture_desc_init");

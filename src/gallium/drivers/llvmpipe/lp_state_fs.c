@@ -1010,7 +1010,7 @@ lp_blend_type_from_format_desc(const struct util_format_description *format_desc
 
 
 /**
- * Scale a normalised value from src_bits to dst_bits
+ * Scale a normalized value from src_bits to dst_bits
  */
 static INLINE LLVMValueRef
 scale_bits(struct gallivm_state *gallivm,
@@ -1047,7 +1047,7 @@ scale_bits(struct gallivm_state *gallivm,
 
          result = LLVMBuildOr(builder, result, lower, "");
       } else if (db > src_bits) {
-         /* Need to repeatedely copy src bits to fill remainder in dst */
+         /* Need to repeatedly copy src bits to fill remainder in dst */
          unsigned n;
 
          for (n = src_bits; n < dst_bits; n *= 2) {
@@ -1143,7 +1143,10 @@ convert_to_blend_type(struct gallivm_state *gallivm,
                                  "");
 
          /* Scale bits */
-         chans[j] = scale_bits(gallivm, src_fmt->channel[j].size, blend_type.width, chans[j], src_type);
+         if (src_type.norm) {
+            chans[j] = scale_bits(gallivm, src_fmt->channel[j].size,
+                                  blend_type.width, chans[j], src_type);
+         }
 
          /* Insert bits into correct position */
          chans[j] = LLVMBuildShl(builder,
@@ -1213,7 +1216,7 @@ convert_from_blend_type(struct gallivm_state *gallivm,
       }
    }
 
-   /* No bit arithmitic to do */
+   /* No bit arithmetic to do */
    if (!is_arith) {
       return;
    }
@@ -1250,7 +1253,10 @@ convert_from_blend_type(struct gallivm_state *gallivm,
                                  "");
 
          /* Scale down bits */
-         chans[j] = scale_bits(gallivm, blend_type.width, src_fmt->channel[j].size, chans[j], src_type);
+         if (src_type.norm) {
+            chans[j] = scale_bits(gallivm, blend_type.width,
+                                  src_fmt->channel[j].size, chans[j], src_type);
+         }
 
          /* Insert bits */
          chans[j] = LLVMBuildShl(builder,
@@ -1438,6 +1444,25 @@ generate_unswizzled_blend(struct gallivm_state *gallivm,
       }
    }
 
+   if (util_format_is_pure_integer(out_format)) {
+      /*
+       * In this case fs_type was really ints or uints disguised as floats,
+       * fix that up now.
+       */
+      fs_type.floating = 0;
+      fs_type.sign = dst_type.sign;
+      for (i = 0; i < num_fs; ++i) {
+         for (j = 0; j < dst_channels; ++j) {
+            fs_src[i][j] = LLVMBuildBitCast(builder, fs_src[i][j],
+                                            lp_build_vec_type(gallivm, fs_type), "");
+         }
+         if (dst_channels == 3 && !has_alpha) {
+            fs_src[i][3] = LLVMBuildBitCast(builder, fs_src[i][3],
+                                            lp_build_vec_type(gallivm, fs_type), "");
+         }
+      }
+   }
+
 
    /*
     * Pixel twiddle from fragment shader order to memory order
@@ -1578,6 +1603,7 @@ generate_unswizzled_blend(struct gallivm_state *gallivm,
             unsigned pixels = block_size / src_count;
             unsigned channels = pad_inline ? TGSI_NUM_CHANNELS : dst_channels;
             unsigned alpha_span = 1;
+            LLVMValueRef shuffles[LP_MAX_VECTOR_LENGTH];
 
             /* Check if we need 2 src_alphas for our shuffles */
             if (pixels > alpha_type.length) {
@@ -1585,21 +1611,20 @@ generate_unswizzled_blend(struct gallivm_state *gallivm,
             }
 
             /* Broadcast alpha across all channels, e.g. a1a2 to a1a1a1a1a2a2a2a2 */
+            for (j = 0; j < row_type.length; ++j) {
+               if (j < pixels * channels) {
+                  shuffles[j] = lp_build_const_int32(gallivm, j / channels);
+               } else {
+                  shuffles[j] = LLVMGetUndef(LLVMInt32TypeInContext(gallivm->context));
+               }
+            }
+
             for (i = 0; i < src_count; ++i) {
-               LLVMValueRef shuffles[LP_MAX_VECTOR_LENGTH];
                unsigned idx1 = i, idx2 = i;
 
                if (alpha_span > 1){
                   idx1 *= alpha_span;
                   idx2 = idx1 + 1;
-               }
-
-               for (j = 0; j < row_type.length; ++j) {
-                  if (j < pixels * channels) {
-                     shuffles[j] = lp_build_const_int32(gallivm, j / channels);
-                  } else {
-                     shuffles[j] = LLVMGetUndef(LLVMInt32TypeInContext(gallivm->context));
-                  }
                }
 
                src_alpha[i] = LLVMBuildShuffleVector(builder,
@@ -1645,12 +1670,21 @@ generate_unswizzled_blend(struct gallivm_state *gallivm,
    /*
     * Blending
     */
+   /* XXX this is broken for RGB8 formats -
+    * they get expanded from 12 to 16 elements (to include alpha)
+    * by convert_to_blend_type then reduced to 15 instead of 12
+    * by convert_from_blend_type (a simple fix though breaks A8...).
+    * R16G16B16 also crashes differently however something going wrong
+    * inside llvm handling npot vector sizes seemingly.
+    * It seems some cleanup could be done here (like skipping conversion/blend
+    * when not needed).
+    */
    convert_to_blend_type(gallivm, out_format_desc, dst_type, row_type, dst, src_count);
 
    for (i = 0; i < src_count; ++i) {
       dst[i] = lp_build_blend_aos(gallivm,
                                   &variant->key.blend,
-                                  variant->key.cbuf_format,
+                                  out_format,
                                   row_type,
                                   rt,
                                   src[i],
@@ -1870,7 +1904,7 @@ generate_fragment(struct llvmpipe_context *lp,
    LLVMPositionBuilderAtEnd(builder, block);
 
    /* code generated texture sampling */
-   sampler = lp_llvm_sampler_soa_create(key->sampler, context_ptr);
+   sampler = lp_llvm_sampler_soa_create(key->state, context_ptr);
 
    zs_format_desc = util_format_description(key->zsbuf_format);
 
@@ -1999,7 +2033,6 @@ generate_fragment(struct llvmpipe_context *lp,
       LLVMValueRef color_ptr;
       LLVMValueRef stride;
       LLVMValueRef index = lp_build_const_int32(gallivm, cbuf);
-      unsigned rt = key->blend.independent_blend_enable ? cbuf : 0;
 
       boolean do_branch = ((key->depth.enabled
                             || key->stencil[0].enabled
@@ -2016,7 +2049,7 @@ generate_fragment(struct llvmpipe_context *lp,
                              LLVMBuildGEP(builder, stride_ptr, &index, 1, ""),
                              "");
 
-      generate_unswizzled_blend(gallivm, rt, variant, key->cbuf_format[cbuf],
+      generate_unswizzled_blend(gallivm, cbuf, variant, key->cbuf_format[cbuf],
                                 num_fs, fs_type, fs_mask, fs_out_color[cbuf],
                                 context_ptr, color_ptr, stride, partial_mask, do_branch);
    }
@@ -2080,32 +2113,39 @@ dump_fs_variant_key(const struct lp_fragment_shader_variant_key *key)
    }
    debug_printf("blend.colormask = 0x%x\n", key->blend.rt[0].colormask);
    for (i = 0; i < key->nr_samplers; ++i) {
+      const struct lp_static_sampler_state *sampler = &key->state[i].sampler_state;
       debug_printf("sampler[%u] = \n", i);
-      debug_printf("  .format = %s\n",
-                   util_format_name(key->sampler[i].format));
-      debug_printf("  .target = %s\n",
-                   util_dump_tex_target(key->sampler[i].target, TRUE));
-      debug_printf("  .pot = %u %u %u\n",
-                   key->sampler[i].pot_width,
-                   key->sampler[i].pot_height,
-                   key->sampler[i].pot_depth);
       debug_printf("  .wrap = %s %s %s\n",
-                   util_dump_tex_wrap(key->sampler[i].wrap_s, TRUE),
-                   util_dump_tex_wrap(key->sampler[i].wrap_t, TRUE),
-                   util_dump_tex_wrap(key->sampler[i].wrap_r, TRUE));
+                   util_dump_tex_wrap(sampler->wrap_s, TRUE),
+                   util_dump_tex_wrap(sampler->wrap_t, TRUE),
+                   util_dump_tex_wrap(sampler->wrap_r, TRUE));
       debug_printf("  .min_img_filter = %s\n",
-                   util_dump_tex_filter(key->sampler[i].min_img_filter, TRUE));
+                   util_dump_tex_filter(sampler->min_img_filter, TRUE));
       debug_printf("  .min_mip_filter = %s\n",
-                   util_dump_tex_mipfilter(key->sampler[i].min_mip_filter, TRUE));
+                   util_dump_tex_mipfilter(sampler->min_mip_filter, TRUE));
       debug_printf("  .mag_img_filter = %s\n",
-                   util_dump_tex_filter(key->sampler[i].mag_img_filter, TRUE));
-      if (key->sampler[i].compare_mode != PIPE_TEX_COMPARE_NONE)
-         debug_printf("  .compare_func = %s\n", util_dump_func(key->sampler[i].compare_func, TRUE));
-      debug_printf("  .normalized_coords = %u\n", key->sampler[i].normalized_coords);
-      debug_printf("  .min_max_lod_equal = %u\n", key->sampler[i].min_max_lod_equal);
-      debug_printf("  .lod_bias_non_zero = %u\n", key->sampler[i].lod_bias_non_zero);
-      debug_printf("  .apply_min_lod = %u\n", key->sampler[i].apply_min_lod);
-      debug_printf("  .apply_max_lod = %u\n", key->sampler[i].apply_max_lod);
+                   util_dump_tex_filter(sampler->mag_img_filter, TRUE));
+      if (sampler->compare_mode != PIPE_TEX_COMPARE_NONE)
+         debug_printf("  .compare_func = %s\n", util_dump_func(sampler->compare_func, TRUE));
+      debug_printf("  .normalized_coords = %u\n", sampler->normalized_coords);
+      debug_printf("  .min_max_lod_equal = %u\n", sampler->min_max_lod_equal);
+      debug_printf("  .lod_bias_non_zero = %u\n", sampler->lod_bias_non_zero);
+      debug_printf("  .apply_min_lod = %u\n", sampler->apply_min_lod);
+      debug_printf("  .apply_max_lod = %u\n", sampler->apply_max_lod);
+   }
+   for (i = 0; i < key->nr_sampler_views; ++i) {
+      const struct lp_static_texture_state *texture = &key->state[i].texture_state;
+      debug_printf("texture[%u] = \n", i);
+      debug_printf("  .format = %s\n",
+                   util_format_name(texture->format));
+      debug_printf("  .target = %s\n",
+                   util_dump_tex_target(texture->target, TRUE));
+      debug_printf("  .level_zero_only = %u\n",
+                   texture->level_zero_only);
+      debug_printf("  .pot = %u %u %u\n",
+                   texture->pot_width,
+                   texture->pot_height,
+                   texture->pot_depth);
    }
 }
 
@@ -2218,6 +2258,7 @@ llvmpipe_create_fs_state(struct pipe_context *pipe,
    struct llvmpipe_context *llvmpipe = llvmpipe_context(pipe);
    struct lp_fragment_shader *shader;
    int nr_samplers;
+   int nr_sampler_views;
    int i;
 
    shader = CALLOC_STRUCT(lp_fragment_shader);
@@ -2241,9 +2282,10 @@ llvmpipe_create_fs_state(struct pipe_context *pipe,
    }
 
    nr_samplers = shader->info.base.file_max[TGSI_FILE_SAMPLER] + 1;
+   nr_sampler_views = shader->info.base.file_max[TGSI_FILE_SAMPLER_VIEW] + 1;
 
    shader->variant_key_size = Offset(struct lp_fragment_shader_variant_key,
-				     sampler[nr_samplers]);
+                                     state[MAX2(nr_samplers, nr_sampler_views)]);
 
    for (i = 0; i < shader->info.base.num_inputs; i++) {
       shader->inputs[i].usage_mask = shader->info.base.input_usage_mask[i];
@@ -2490,7 +2532,11 @@ make_variant_key(struct llvmpipe_context *lp,
       }
    }
 
-   key->alpha.enabled = lp->depth_stencil->alpha.enabled;
+   /* alpha test only applies if render buffer 0 is non-integer (or does not exist) */
+   if (!lp->framebuffer.nr_cbufs ||
+       !util_format_is_pure_integer(lp->framebuffer.cbufs[0]->format)) {
+      key->alpha.enabled = lp->depth_stencil->alpha.enabled;
+   }
    if(key->alpha.enabled)
       key->alpha.func = lp->depth_stencil->alpha.func;
    /* alpha.ref_value is passed in jit_context */
@@ -2505,6 +2551,15 @@ make_variant_key(struct llvmpipe_context *lp,
    }
 
    key->nr_cbufs = lp->framebuffer.nr_cbufs;
+
+   if (!key->blend.independent_blend_enable) {
+      /* we always need independent blend otherwise the fixups below won't work */
+      for (i = 1; i < key->nr_cbufs; i++) {
+         memcpy(&key->blend.rt[i], &key->blend.rt[0], sizeof(key->blend.rt[0]));
+      }
+      key->blend.independent_blend_enable = 1;
+   }
+
    for (i = 0; i < lp->framebuffer.nr_cbufs; i++) {
       enum pipe_format format = lp->framebuffer.cbufs[i]->format;
       struct pipe_rt_blend_state *blend_rt = &key->blend.rt[i];
@@ -2516,12 +2571,17 @@ make_variant_key(struct llvmpipe_context *lp,
       assert(format_desc->colorspace == UTIL_FORMAT_COLORSPACE_RGB ||
              format_desc->colorspace == UTIL_FORMAT_COLORSPACE_SRGB);
 
-      blend_rt->colormask = lp->blend->rt[i].colormask;
-
       /*
        * Mask out color channels not present in the color buffer.
        */
       blend_rt->colormask &= util_format_colormask(format_desc);
+
+      /*
+       * Disable blend for integer formats.
+       */
+      if (util_format_is_pure_integer(format)) {
+         blend_rt->blend_enable = 0;
+      }
 
       /*
        * Our swizzled render tiles always have an alpha channel, but the linear
@@ -2539,7 +2599,7 @@ make_variant_key(struct llvmpipe_context *lp,
        * Also, force rgb/alpha func/factors match, to make AoS blending easier.
        */
       if (format_desc->swizzle[3] > UTIL_FORMAT_SWIZZLE_W ||
-	  format_desc->swizzle[3] == format_desc->swizzle[0]) {
+          format_desc->swizzle[3] == format_desc->swizzle[0]) {
          blend_rt->rgb_src_factor   = force_dst_alpha_one(blend_rt->rgb_src_factor);
          blend_rt->rgb_dst_factor   = force_dst_alpha_one(blend_rt->rgb_dst_factor);
          blend_rt->alpha_func       = blend_rt->rgb_func;
@@ -2554,9 +2614,32 @@ make_variant_key(struct llvmpipe_context *lp,
 
    for(i = 0; i < key->nr_samplers; ++i) {
       if(shader->info.base.file_mask[TGSI_FILE_SAMPLER] & (1 << i)) {
-         lp_sampler_static_state(&key->sampler[i],
-				 lp->sampler_views[PIPE_SHADER_FRAGMENT][i],
-				 lp->samplers[PIPE_SHADER_FRAGMENT][i]);
+         lp_sampler_static_sampler_state(&key->state[i].sampler_state,
+                                         lp->samplers[PIPE_SHADER_FRAGMENT][i]);
+      }
+   }
+
+   /*
+    * XXX If TGSI_FILE_SAMPLER_VIEW exists assume all texture opcodes
+    * are dx10-style? Can't really have mixed opcodes, at least not
+    * if we want to skip the holes here (without rescanning tgsi).
+    */
+   if (shader->info.base.file_max[TGSI_FILE_SAMPLER_VIEW] != -1) {
+      key->nr_sampler_views = shader->info.base.file_max[TGSI_FILE_SAMPLER_VIEW] + 1;
+      for(i = 0; i < key->nr_sampler_views; ++i) {
+         if(shader->info.base.file_mask[TGSI_FILE_SAMPLER_VIEW] & (1 << i)) {
+            lp_sampler_static_texture_state(&key->state[i].texture_state,
+                                            lp->sampler_views[PIPE_SHADER_FRAGMENT][i]);
+         }
+      }
+   }
+   else {
+      key->nr_sampler_views = key->nr_samplers;
+      for(i = 0; i < key->nr_sampler_views; ++i) {
+         if(shader->info.base.file_mask[TGSI_FILE_SAMPLER] & (1 << i)) {
+            lp_sampler_static_texture_state(&key->state[i].texture_state,
+                                            lp->sampler_views[PIPE_SHADER_FRAGMENT][i]);
+         }
       }
    }
 }
@@ -2665,8 +2748,6 @@ llvmpipe_update_fs(struct llvmpipe_context *lp)
    /* Bind this variant */
    lp_setup_set_fs_variant(lp->setup, variant);
 }
-
-
 
 
 
