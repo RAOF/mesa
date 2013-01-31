@@ -9,7 +9,6 @@ mesa (9.1~git20130129.ff515c4e-1) UNRELEASED; urgency=low
   [ Timo Aaltonen ]
   * Refresh patches
     - disable 05_kfreebsd-egl-x11.diff for now.
-    - switch to llvm-3.2 (Closes: #678822).
   * control: Added libtool to build-depends.
   * rules: Drop special handling of config.{guess,sub}, not needed anymore.
   * rules, libosmesa*: Build only the 32bit OSMesa library.
@@ -35,6 +34,7 @@ mesa (9.1~git20130129.ff515c4e-1) UNRELEASED; urgency=low
   * Update symbols for libgles2-mesa
   * libegl1-mesa-drivers.install.linux: Bump libwayland-egl.so version
   * control: Add libdrm-dev to mesa-common-dev Depends.
+  * control: Build-depend on llvm-3.2-dev (Closes: #678822).
 
   [ Steve Langasek ]
   * Install all dri drivers from the DESTDIR tree, instead of copying them
