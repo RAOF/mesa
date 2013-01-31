@@ -1,11 +1,12 @@
-mesa (9.1~git20130109.959e83d6-1) UNRELEASED; urgency=low
+mesa (9.1~git20130129.ff515c4e-1) UNRELEASED; urgency=low
+
+  * New upstream snapshot.
+    - Set close on exec flag when opening dri devices (Closes: #651370).
 
   [ Julien Cristau ]
   * Use xz for all binary packages not just *-dbg.
 
   [ Timo Aaltonen ]
-  * New upstream snapshot.
-    - Set close on exec flag when opening dri devices (Closes: #651370).
   * Refresh patches
     - disable 05_kfreebsd-egl-x11.diff for now.
     - switch to llvm-3.2 (Closes: #678822).
@@ -48,7 +49,6 @@ mesa (9.1~git20130109.959e83d6-1) UNRELEASED; urgency=low
     in Debian right now so let's just be complete.
 
   [ Maarten Lankhorst ]
-  * New upstream release 9.0.2.
   * Bump standards-version to 3.9.3.
   * control: Bump libwayland-dev build-dep to 1.0.2.
   * Remove 13-llvm-config-pick-a-version.diff and just pass a flag to configure.
