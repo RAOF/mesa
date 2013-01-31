@@ -52,7 +52,6 @@ mesa (9.1~git20130129.ff515c4e-1) UNRELEASED; urgency=low
   * Bump standards-version to 3.9.3.
   * control: Bump libwayland-dev build-dep to 1.0.2.
   * Remove 13-llvm-config-pick-a-version.diff and just pass a flag to configure.
-  * Add 16-radeon-ndebug.diff to fix a build failure against llvm
 
  -- Julien Cristau <jcristau@debian.org>  Fri, 03 Aug 2012 23:17:16 +0200
 
