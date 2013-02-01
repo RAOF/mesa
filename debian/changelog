@@ -35,6 +35,7 @@ mesa (9.1~git20130129.ff515c4e-1) UNRELEASED; urgency=low
   * libegl1-mesa-drivers.install.linux: Bump libwayland-egl.so version
   * control: Add libdrm-dev to mesa-common-dev Depends.
   * control: Build-depend on llvm-3.2-dev (Closes: #678822).
+  * 15-fix-oot-build.diff: Use correct includes to fix out-of-tree builds.
 
   [ Steve Langasek ]
   * Install all dri drivers from the DESTDIR tree, instead of copying them
