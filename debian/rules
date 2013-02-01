@@ -229,6 +229,7 @@ clean: unpatch
 	rm -f src/glsl/builtins/tools/texture_builtins.pyc
 	rm -f src/mapi/glapi/gen/*.pyc
 	rm -f src/mesa/main/*.pyc
+	rm -f src/gallium/auxiliary/util/*.pyc
 
 	dh_clean
 

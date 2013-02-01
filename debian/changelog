@@ -56,6 +56,7 @@ mesa (9.1~git20130129.ff515c4e-1) UNRELEASED; urgency=low
 
   [ Timo Aaltonen ]
   * libgl1-mesa-dri.install.in: Include gallium-pipe/*.so.
+  * rules: Add files to clean.
 
  -- Julien Cristau <jcristau@debian.org>  Fri, 03 Aug 2012 23:17:16 +0200
 
