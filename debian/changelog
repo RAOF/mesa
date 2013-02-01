@@ -54,6 +54,9 @@ mesa (9.1~git20130129.ff515c4e-1) UNRELEASED; urgency=low
   * control: Bump libwayland-dev build-dep to 1.0.2.
   * Remove 13-llvm-config-pick-a-version.diff and just pass a flag to configure.
 
+  [ Timo Aaltonen ]
+  * libgl1-mesa-dri.install.in: Include gallium-pipe/*.so.
+
  -- Julien Cristau <jcristau@debian.org>  Fri, 03 Aug 2012 23:17:16 +0200
 
 mesa (8.0.4-1) unstable; urgency=low
