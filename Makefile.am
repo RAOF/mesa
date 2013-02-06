@@ -54,13 +54,22 @@ distclean-local:
 
 # Rules for making release tarballs
 
-PACKAGE_VERSION=9.0
+PACKAGE_VERSION=9.0.2
 PACKAGE_DIR = Mesa-$(PACKAGE_VERSION)
 PACKAGE_NAME = MesaLib-$(PACKAGE_VERSION)
 
 EXTRA_FILES = \
 	aclocal.m4					\
 	configure					\
+	bin/ar-lib					\
+	bin/compile					\
+	bin/config.sub					\
+	bin/config.guess				\
+	bin/depcomp					\
+	bin/install-sh					\
+	bin/ltmain.sh					\
+	bin/missing					\
+	bin/ylwrap					\
 	src/glsl/glsl_parser.cc				\
 	src/glsl/glsl_parser.h				\
 	src/glsl/glsl_lexer.cc				\
@@ -75,7 +84,9 @@ EXTRA_FILES = \
 	src/mesa/main/api_exec_es2_remap_helper.h	\
 	src/mesa/program/lex.yy.c			\
 	src/mesa/program/program_parse.tab.c		\
-	src/mesa/program/program_parse.tab.h
+	src/mesa/program/program_parse.tab.h		\
+	`git ls-files | grep "Makefile.am" | sed -e "s/Makefile.am/Makefile.in/"`
+
 
 IGNORE_FILES = \
 	-x autogen.sh

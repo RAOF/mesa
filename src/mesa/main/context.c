@@ -404,9 +404,6 @@ one_time_init( struct gl_context *ctx )
 
       _mesa_get_cpu_features();
 
-      /* context dependence is never a one-time thing... */
-      _mesa_init_get_hash(ctx);
-
       for (i = 0; i < 256; i++) {
          _mesa_ubyte_to_float_color_tab[i] = (float) i / 255.0F;
       }
@@ -425,6 +422,8 @@ one_time_init( struct gl_context *ctx )
 
    /* per-API one-time init */
    if (!(api_init_mask & (1 << ctx->API))) {
+      _mesa_init_get_hash(ctx);
+
       /*
        * This is fine as ES does not use the remap table, but it may not be
        * future-proof.  We cannot always initialize the remap table because
@@ -625,7 +624,7 @@ _mesa_init_constants(struct gl_context *ctx)
 #if FEATURE_ARB_vertex_shader
    ctx->Const.MaxVertexTextureImageUnits = MAX_VERTEX_TEXTURE_IMAGE_UNITS;
    ctx->Const.MaxCombinedTextureImageUnits = MAX_COMBINED_TEXTURE_IMAGE_UNITS;
-   ctx->Const.MaxVarying = MAX_VARYING;
+   ctx->Const.MaxVarying = 16; /* old limit not to break tnl and swrast */
 #endif
 #if FEATURE_ARB_geometry_shader4
    ctx->Const.MaxGeometryTextureImageUnits = MAX_GEOMETRY_TEXTURE_IMAGE_UNITS;

@@ -1002,6 +1002,43 @@ _mesa_get_texture_dimensions(GLenum target)
 }
 
 
+/**
+ * Return the maximum number of mipmap levels for the given target
+ * and the dimensions.
+ * The dimensions are expected not to include the border.
+ */
+GLsizei
+_mesa_get_tex_max_num_levels(GLenum target, GLsizei width, GLsizei height,
+                             GLsizei depth)
+{
+   GLsizei size;
+
+   switch (target) {
+   case GL_TEXTURE_1D:
+   case GL_TEXTURE_1D_ARRAY:
+      size = width;
+      break;
+   case GL_TEXTURE_CUBE_MAP:
+   case GL_TEXTURE_CUBE_MAP_ARRAY:
+      ASSERT(width == height);
+      size = width;
+      break;
+   case GL_TEXTURE_2D:
+   case GL_TEXTURE_2D_ARRAY:
+      size = MAX2(width, height);
+      break;
+   case GL_TEXTURE_3D:
+      size = MAX3(width, height, depth);
+      break;
+   case GL_TEXTURE_RECTANGLE:
+      return 1;
+   default:
+      assert(0);
+      return 1;
+   }
+
+   return _mesa_logbase2(size) + 1;
+}
 
 
 #if 000 /* not used anymore */
@@ -1187,7 +1224,9 @@ _mesa_init_teximage_fields(struct gl_context *ctx,
                     target);
    }
 
-   img->MaxLog2 = MAX2(img->WidthLog2, img->HeightLog2);
+   img->MaxNumLevels =
+      _mesa_get_tex_max_num_levels(target,
+                                   img->Width2, img->Height2, img->Depth2);
    img->TexFormat = format;
 }
 
@@ -3034,13 +3073,15 @@ teximage(struct gl_context *ctx, GLboolean compressed, GLuint dims,
                                           border, internalFormat, texFormat);
 
                /* Give the texture to the driver.  <pixels> may be null. */
-               if (compressed) {
-                  ctx->Driver.CompressedTexImage(ctx, dims, texImage,
-                                                 imageSize, pixels);
-               }
-               else {
-                  ctx->Driver.TexImage(ctx, dims, texImage, format,
-                                       type, pixels, unpack);
+               if (width > 0 && height > 0 && depth > 0) {
+                  if (compressed) {
+                     ctx->Driver.CompressedTexImage(ctx, dims, texImage,
+                                                    imageSize, pixels);
+                  }
+                  else {
+                     ctx->Driver.TexImage(ctx, dims, texImage, format,
+                                          type, pixels, unpack);
+                  }
                }
 
                check_gen_mipmap(ctx, target, texObj, level);
@@ -3596,10 +3637,10 @@ compressed_subtexture_error_check(struct gl_context *ctx, GLint dimensions,
    if (!_mesa_is_compressed_format(ctx, format))
       return GL_INVALID_ENUM;
 
-   if (width < 1 || width > maxTextureSize)
+   if (width < 0 || width > maxTextureSize)
       return GL_INVALID_VALUE;
 
-   if ((height < 1 || height > maxTextureSize)
+   if ((height < 0 || height > maxTextureSize)
        && dimensions > 1)
       return GL_INVALID_VALUE;
 
