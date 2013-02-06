@@ -1,3 +1,14 @@
+mesa (9.0.2-0ubuntu0.1) UNRELEASED; urgency=low
+
+  * Merge package from raring.
+  * Add patch to build against quantal's wayland again
+    - 119-revert-wayland102.patch
+  * Enable size reduction patches already used in the backported lts-quantal stack.
+    - 117-static-gallium.patch
+    - 118-dricore-gallium.patch
+
+ -- Maarten Lankhorst <maarten.lankhorst@ubuntu.com>  Wed, 06 Feb 2013 14:48:43 +0100
+
 mesa (9.0.2-0ubuntu1) raring; urgency=low
 
   * New upstream release.

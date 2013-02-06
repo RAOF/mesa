@@ -1,0 +1,1084 @@
+Revert back to wayland 0.95 shipped with quantal.
+
+Patch generated with:
+git diff a5776ac0b8c015bf5d6a8513^ \
+         src/egl/wayland/ src/egl/drivers/dri2/*wayland* \
+         src/gallium/state_trackers/egl/wayland/ \
+         src/egl/drivers/dri2/egl_dri2.h \
+         | patch -Rp1
+
+---
+diff --git a/configure.ac b/configure.ac
+index 682e0a5..b711e13 100644
+--- a/configure.ac
++++ b/configure.ac
+@@ -1530,7 +1530,7 @@ for plat in $egl_platforms; do
+ 		;;
+ 
+ 	wayland)
+-		PKG_CHECK_MODULES([WAYLAND], [wayland-client >= 1.0.2 wayland-server >= 1.0.2])
++		PKG_CHECK_MODULES([WAYLAND], [wayland-client wayland-server])
+ 		GALLIUM_WINSYS_DIRS="$GALLIUM_WINSYS_DIRS sw/wayland"
+ 
+                 WAYLAND_PREFIX=`$PKG_CONFIG --variable=prefix wayland-client`
+diff --git a/src/egl/drivers/dri2/egl_dri2.h b/src/egl/drivers/dri2/egl_dri2.h
+index 2e7b547..81c1354 100644
+--- a/src/egl/drivers/dri2/egl_dri2.h
++++ b/src/egl/drivers/dri2/egl_dri2.h
+@@ -122,10 +122,8 @@ struct dri2_egl_display
+ 
+ #ifdef HAVE_WAYLAND_PLATFORM
+    struct wl_display        *wl_dpy;
+-   struct wl_registry       *wl_registry;
+    struct wl_drm            *wl_server_drm;
+    struct wl_drm            *wl_drm;
+-   struct wl_event_queue    *wl_queue;
+    int			     authenticated;
+    int			     formats;
+ #endif
+@@ -176,8 +174,7 @@ struct dri2_egl_surface
+    __DRIbuffer           *dri_buffers[__DRI_BUFFER_COUNT];
+    __DRIbuffer           *third_buffer;
+    __DRIbuffer           *pending_buffer;
+-   struct wl_callback    *frame_callback;
+-   struct wl_callback    *pending_buffer_callback;
++   EGLBoolean             block_swap_buffers;
+    int			  format;
+ #endif
+ 
+diff --git a/src/egl/drivers/dri2/platform_wayland.c b/src/egl/drivers/dri2/platform_wayland.c
+index ccff9a8..d291f0f 100644
+--- a/src/egl/drivers/dri2/platform_wayland.c
++++ b/src/egl/drivers/dri2/platform_wayland.c
+@@ -46,37 +46,6 @@ enum wl_drm_format_flags {
+ };
+ 
+ static void
+-sync_callback(void *data, struct wl_callback *callback, uint32_t serial)
+-{
+-   int *done = data;
+-
+-   *done = 1;
+-   wl_callback_destroy(callback);
+-}
+-
+-static const struct wl_callback_listener sync_listener = {
+-   sync_callback
+-};
+-
+-static int
+-roundtrip(struct dri2_egl_display *dri2_dpy)
+-{
+-   struct wl_callback *callback;
+-   int done = 0, ret = 0;
+-
+-   callback = wl_display_sync(dri2_dpy->wl_dpy);
+-   wl_callback_add_listener(callback, &sync_listener, &done);
+-   wl_proxy_set_queue((struct wl_proxy *) callback, dri2_dpy->wl_queue);
+-   while (ret != -1 && !done)
+-      ret = wl_display_dispatch_queue(dri2_dpy->wl_dpy, dri2_dpy->wl_queue);
+-
+-   if (!done)
+-      wl_callback_destroy(callback);
+-
+-   return ret;
+-}
+-
+-static void
+ wl_buffer_release(void *data, struct wl_buffer *buffer)
+ {
+    struct dri2_egl_surface *dri2_surf = data;
+@@ -100,16 +69,6 @@ static struct wl_buffer_listener wl_buffer_listener = {
+    wl_buffer_release
+ };
+ 
+-static void
+-resize_callback(struct wl_egl_window *wl_win, void *data)
+-{
+-   struct dri2_egl_surface *dri2_surf = data;
+-   struct dri2_egl_display *dri2_dpy =
+-      dri2_egl_display(dri2_surf->base.Resource.Display);
+-
+-   (*dri2_dpy->flush->invalidate)(dri2_surf->dri_drawable);
+-}
+-
+ /**
+  * Called via eglCreateWindowSurface(), drv->API.CreateWindowSurface().
+  */
+@@ -121,6 +80,7 @@ dri2_create_surface(_EGLDriver *drv, _EGLDisplay *disp, EGLint type,
+    struct dri2_egl_display *dri2_dpy = dri2_egl_display(disp);
+    struct dri2_egl_config *dri2_conf = dri2_egl_config(conf);
+    struct dri2_egl_surface *dri2_surf;
++   struct dri2_egl_buffer *dri2_buf;
+    int i;
+ 
+    (void) drv;
+@@ -144,8 +104,7 @@ dri2_create_surface(_EGLDriver *drv, _EGLDisplay *disp, EGLint type,
+ 
+    dri2_surf->pending_buffer = NULL;
+    dri2_surf->third_buffer = NULL;
+-   dri2_surf->frame_callback = NULL;
+-   dri2_surf->pending_buffer_callback = NULL;
++   dri2_surf->block_swap_buffers = EGL_FALSE;
+ 
+    if (conf->AlphaSize == 0)
+       dri2_surf->format = WL_DRM_FORMAT_XRGB8888;
+@@ -156,12 +115,20 @@ dri2_create_surface(_EGLDriver *drv, _EGLDisplay *disp, EGLint type,
+    case EGL_WINDOW_BIT:
+       dri2_surf->wl_win = (struct wl_egl_window *) window;
+ 
+-      dri2_surf->wl_win->private = dri2_surf;
+-      dri2_surf->wl_win->resize_callback = resize_callback;
+-
+       dri2_surf->base.Width =  -1;
+       dri2_surf->base.Height = -1;
+       break;
++   case EGL_PIXMAP_BIT:
++      dri2_surf->wl_pix = (struct wl_egl_pixmap *) window;
++
++      dri2_surf->base.Width  = dri2_surf->wl_pix->width;
++      dri2_surf->base.Height = dri2_surf->wl_pix->height;
++
++      if (dri2_surf->wl_pix->driver_private) {
++         dri2_buf = dri2_surf->wl_pix->driver_private;
++         dri2_surf->dri_buffers[__DRI_BUFFER_FRONT_LEFT] = dri2_buf->dri_buffer;
++      }
++      break;
+    default: 
+       goto cleanup_surf;
+    }
+@@ -199,6 +166,15 @@ dri2_create_window_surface(_EGLDriver *drv, _EGLDisplay *disp,
+ 			      window, attrib_list);
+ }
+ 
++static _EGLSurface *
++dri2_create_pixmap_surface(_EGLDriver *drv, _EGLDisplay *disp,
++			   _EGLConfig *conf, EGLNativePixmapType pixmap,
++			   const EGLint *attrib_list)
++{
++   return dri2_create_surface(drv, disp, EGL_PIXMAP_BIT, conf,
++			      pixmap, attrib_list);
++}
++
+ /**
+  * Called via eglDestroySurface(), drv->API.DestroySurface().
+  */
+@@ -221,7 +197,8 @@ dri2_destroy_surface(_EGLDriver *drv, _EGLDisplay *disp, _EGLSurface *surf)
+          wl_buffer_destroy(dri2_surf->wl_drm_buffer[i]);
+ 
+    for (i = 0; i < __DRI_BUFFER_COUNT; ++i)
+-      if (dri2_surf->dri_buffers[i])
++      if (dri2_surf->dri_buffers[i] && !(i == __DRI_BUFFER_FRONT_LEFT &&
++          dri2_surf->base.Type == EGL_PIXMAP_BIT))
+          dri2_dpy->dri2->releaseBuffer(dri2_dpy->dri_screen,
+                                        dri2_surf->dri_buffers[i]);
+ 
+@@ -230,21 +207,25 @@ dri2_destroy_surface(_EGLDriver *drv, _EGLDisplay *disp, _EGLSurface *surf)
+                                     dri2_surf->third_buffer);
+    }
+ 
+-   if (dri2_surf->frame_callback)
+-      wl_callback_destroy(dri2_surf->frame_callback);
++   free(surf);
+ 
+-   if (dri2_surf->pending_buffer_callback)
+-      wl_callback_destroy(dri2_surf->pending_buffer_callback);
++   return EGL_TRUE;
++}
+ 
++static void
++dri2_wl_egl_pixmap_destroy(struct wl_egl_pixmap *egl_pixmap)
++{
++   struct dri2_egl_buffer *dri2_buf = egl_pixmap->driver_private;
+ 
+-   if (dri2_surf->base.Type == EGL_WINDOW_BIT) {
+-      dri2_surf->wl_win->private = NULL;
+-      dri2_surf->wl_win->resize_callback = NULL;
+-   }
++   assert(dri2_buf);
+ 
+-   free(surf);
++   dri2_buf->dri2_dpy->dri2->releaseBuffer(dri2_buf->dri2_dpy->dri_screen,
++                                           dri2_buf->dri_buffer);
+ 
+-   return EGL_TRUE;
++   free(dri2_buf);
++   
++   egl_pixmap->driver_private = NULL;
++   egl_pixmap->destroy = NULL;
+ }
+ 
+ static struct wl_buffer *
+@@ -287,6 +268,30 @@ dri2_process_back_buffer(struct dri2_egl_surface *dri2_surf, unsigned format)
+ }
+ 
+ static void
++dri2_process_front_buffer(struct dri2_egl_surface *dri2_surf, unsigned format)
++{
++   struct dri2_egl_display *dri2_dpy =
++      dri2_egl_display(dri2_surf->base.Resource.Display);
++   struct dri2_egl_buffer *dri2_buf;
++
++   switch (dri2_surf->base.Type) {
++   case EGL_PIXMAP_BIT:
++      dri2_buf = malloc(sizeof *dri2_buf);
++      if (!dri2_buf)
++         return;
++
++      dri2_buf->dri_buffer = dri2_surf->dri_buffers[__DRI_BUFFER_FRONT_LEFT];
++      dri2_buf->dri2_dpy   = dri2_dpy;
++
++      dri2_surf->wl_pix->driver_private = dri2_buf;
++      dri2_surf->wl_pix->destroy        = dri2_wl_egl_pixmap_destroy;
++      break;
++   default:
++      break;
++   }
++}
++
++static void
+ dri2_release_pending_buffer(void *data,
+ 			    struct wl_callback *callback, uint32_t time)
+ {
+@@ -303,7 +308,6 @@ dri2_release_pending_buffer(void *data,
+    dri2_surf->pending_buffer = NULL;
+ 
+    wl_callback_destroy(callback);
+-   dri2_surf->pending_buffer_callback = NULL;
+ }
+ 
+ static const struct wl_callback_listener release_buffer_listener = {
+@@ -329,14 +333,11 @@ dri2_release_buffers(struct dri2_egl_surface *dri2_surf)
+          switch (i) {
+          case __DRI_BUFFER_FRONT_LEFT:
+             if (dri2_surf->pending_buffer)
+-               roundtrip(dri2_dpy);
++	      wl_display_roundtrip(dri2_dpy->wl_dpy);
+             dri2_surf->pending_buffer = dri2_surf->dri_buffers[i];
+             callback = wl_display_sync(dri2_dpy->wl_dpy);
+ 	    wl_callback_add_listener(callback,
+ 				     &release_buffer_listener, dri2_surf);
+-            wl_proxy_set_queue((struct wl_proxy *) callback,
+-                               dri2_dpy->wl_queue);
+-            dri2_surf->pending_buffer_callback = callback;
+             break;
+          default:
+             dri2_dpy->dri2->releaseBuffer(dri2_dpy->dri_screen,
+@@ -429,9 +430,6 @@ dri2_get_buffers_with_format(__DRIdrawable * driDrawable,
+       dri2_egl_display(dri2_surf->base.Resource.Display);
+    int i;
+ 
+-   /* There might be a buffer release already queued that wasn't processed */
+-   wl_display_dispatch_queue_pending(dri2_dpy->wl_dpy, dri2_dpy->wl_queue);
+-
+    if (dri2_surf->base.Type == EGL_WINDOW_BIT &&
+        (dri2_surf->base.Width != dri2_surf->wl_win->width || 
+         dri2_surf->base.Height != dri2_surf->wl_win->height)) {
+@@ -468,7 +466,9 @@ dri2_get_buffers_with_format(__DRIdrawable * driDrawable,
+          if (!dri2_surf->dri_buffers[attachments[i]]) 
+             continue;
+ 
+-         if (attachments[i] == __DRI_BUFFER_BACK_LEFT)
++         if (attachments[i] == __DRI_BUFFER_FRONT_LEFT)
++            dri2_process_front_buffer(dri2_surf, attachments[i+1]);
++         else if (attachments[i] == __DRI_BUFFER_BACK_LEFT)
+             dri2_process_back_buffer(dri2_surf, attachments[i+1]);
+       }
+ 
+@@ -479,7 +479,13 @@ dri2_get_buffers_with_format(__DRIdrawable * driDrawable,
+       dri2_surf->buffer_count++;
+    }
+ 
+-   assert(dri2_surf->dri_buffers[__DRI_BUFFER_BACK_LEFT]);
++   assert(dri2_surf->base.Type == EGL_PIXMAP_BIT ||
++          dri2_surf->dri_buffers[__DRI_BUFFER_BACK_LEFT]);
++
++   if (dri2_surf->base.Type == EGL_PIXMAP_BIT && !dri2_surf->wl_pix->buffer)
++      dri2_surf->wl_pix->buffer =
++         wayland_create_buffer(dri2_surf,
++			       dri2_surf->dri_buffers[__DRI_BUFFER_FRONT_LEFT]);
+ 
+    *out_count = dri2_surf->buffer_count;
+    if (dri2_surf->buffer_count == 0)
+@@ -546,7 +552,7 @@ wayland_frame_callback(void *data, struct wl_callback *callback, uint32_t time)
+ {
+    struct dri2_egl_surface *dri2_surf = data;
+ 
+-   dri2_surf->frame_callback = NULL;
++   dri2_surf->block_swap_buffers = EGL_FALSE;
+    wl_callback_destroy(callback);
+ }
+ 
+@@ -563,18 +569,17 @@ dri2_swap_buffers(_EGLDriver *drv, _EGLDisplay *disp, _EGLSurface *draw)
+    struct dri2_egl_display *dri2_dpy = dri2_egl_display(disp);
+    struct dri2_egl_surface *dri2_surf = dri2_egl_surface(draw);
+    struct dri2_egl_driver *dri2_drv = dri2_egl_driver(drv);
+-   int ret = 0;
++   struct wl_callback *callback;
+ 
+-   while (dri2_surf->frame_callback && ret != -1)
+-      ret = wl_display_dispatch_queue(dri2_dpy->wl_dpy, dri2_dpy->wl_queue);
+-   if (ret < 0)
+-      return EGL_FALSE;
++   if (dri2_surf->block_swap_buffers) {
++      wl_display_flush(dri2_dpy->wl_dpy);
++      while (dri2_surf->block_swap_buffers)
++         wl_display_iterate(dri2_dpy->wl_dpy, WL_DISPLAY_READABLE);
++   }
+ 
+-   dri2_surf->frame_callback = wl_surface_frame(dri2_surf->wl_win->surface);
+-   wl_callback_add_listener(dri2_surf->frame_callback,
+-                            &frame_listener, dri2_surf);
+-   wl_proxy_set_queue((struct wl_proxy *) dri2_surf->frame_callback,
+-                      dri2_dpy->wl_queue);
++   dri2_surf->block_swap_buffers = EGL_TRUE;
++   callback = wl_surface_frame(dri2_surf->wl_win->surface);
++   wl_callback_add_listener(callback, &frame_listener, dri2_surf);
+ 
+    if (dri2_surf->base.Type == EGL_WINDOW_BIT) {
+       pointer_swap(
+@@ -606,8 +611,6 @@ dri2_swap_buffers(_EGLDriver *drv, _EGLDisplay *disp, _EGLSurface *draw)
+ 
+       wl_surface_damage(dri2_surf->wl_win->surface, 0, 0,
+ 	    dri2_surf->base.Width, dri2_surf->base.Height);
+-
+-      wl_surface_commit(dri2_surf->wl_win->surface);
+    }
+ 
+    _EGLContext *ctx;
+@@ -623,6 +626,71 @@ dri2_swap_buffers(_EGLDriver *drv, _EGLDisplay *disp, _EGLSurface *draw)
+    return EGL_TRUE;
+ }
+ 
++/**
++ * Called via eglCreateImageKHR(), drv->API.CreateImageKHR().
++ */
++static _EGLImage *
++dri2_create_image_khr_pixmap(_EGLDisplay *disp, _EGLContext *ctx,
++			     EGLClientBuffer buffer, const EGLint *attr_list)
++{
++   struct dri2_egl_display *dri2_dpy = dri2_egl_display(disp);
++   struct wl_egl_pixmap *wl_egl_pixmap = (struct wl_egl_pixmap *) buffer;
++   struct dri2_egl_buffer *dri2_buf;
++   EGLint wl_attr_list[] = {
++		EGL_WIDTH,		0,
++		EGL_HEIGHT,		0,
++		EGL_DRM_BUFFER_STRIDE_MESA,	0,
++		EGL_DRM_BUFFER_FORMAT_MESA,	EGL_DRM_BUFFER_FORMAT_ARGB32_MESA,
++		EGL_NONE
++   };
++
++   dri2_buf = malloc(sizeof *dri2_buf);
++   if (!dri2_buf)
++           return NULL;
++
++   dri2_buf->dri2_dpy = dri2_dpy;
++   dri2_buf->dri_buffer =
++      dri2_dpy->dri2->allocateBuffer(dri2_dpy->dri_screen,
++				     __DRI_BUFFER_FRONT_LEFT, 32,
++				     wl_egl_pixmap->width,
++				     wl_egl_pixmap->height);
++
++   wl_egl_pixmap->destroy = dri2_wl_egl_pixmap_destroy;
++   wl_egl_pixmap->driver_private = dri2_buf;
++
++   /* FIXME: Get buffer format from attr_list somehow... or from the
++      wl_egl_piaxmap.  */
++   wl_egl_pixmap->buffer =
++      wl_drm_create_buffer(dri2_dpy->wl_drm,
++			   dri2_buf->dri_buffer->name,
++			   wl_egl_pixmap->width,
++			   wl_egl_pixmap->height,
++			   dri2_buf->dri_buffer->pitch,
++			   WL_DRM_FORMAT_ARGB8888);
++
++   wl_attr_list[1] = wl_egl_pixmap->width;
++   wl_attr_list[3] = wl_egl_pixmap->height;
++   wl_attr_list[5] = dri2_buf->dri_buffer->pitch / 4;
++
++   return dri2_create_image_khr(disp->Driver, disp, ctx, EGL_DRM_BUFFER_MESA,
++	(EGLClientBuffer)(intptr_t) dri2_buf->dri_buffer->name, wl_attr_list);
++}
++
++static _EGLImage *
++dri2_wayland_create_image_khr(_EGLDriver *drv, _EGLDisplay *disp,
++			      _EGLContext *ctx, EGLenum target,
++			      EGLClientBuffer buffer, const EGLint *attr_list)
++{
++   (void) drv;
++
++   switch (target) {
++   case EGL_NATIVE_PIXMAP_KHR:
++      return dri2_create_image_khr_pixmap(disp, ctx, buffer, attr_list);
++   default:
++      return dri2_create_image_khr(drv, disp, ctx, target, buffer, attr_list);
++   }
++}
++
+ static int
+ dri2_wayland_authenticate(_EGLDisplay *disp, uint32_t id)
+ {
+@@ -632,8 +700,7 @@ dri2_wayland_authenticate(_EGLDisplay *disp, uint32_t id)
+    dri2_dpy->authenticated = 0;
+ 
+    wl_drm_authenticate(dri2_dpy->wl_drm, id);
+-   if (roundtrip(dri2_dpy) < 0)
+-      ret = -1;
++   wl_display_roundtrip(dri2_dpy->wl_dpy);
+ 
+    if (!dri2_dpy->authenticated)
+       ret = -1;
+@@ -728,37 +795,22 @@ static const struct wl_drm_listener drm_listener = {
+ 	drm_handle_authenticated
+ };
+ 
+-static void
+-registry_handle_global(void *data, struct wl_registry *registry, uint32_t name,
+-		       const char *interface, uint32_t version)
+-{
+-   struct dri2_egl_display *dri2_dpy = data;
+-
+-   if (strcmp(interface, "wl_drm") == 0) {
+-      dri2_dpy->wl_drm =
+-         wl_registry_bind(registry, name, &wl_drm_interface, 1);
+-      wl_drm_add_listener(dri2_dpy->wl_drm, &drm_listener, dri2_dpy);
+-   }
+-}
+-
+-static const struct wl_registry_listener registry_listener = {
+-	registry_handle_global
+-};
+-
+ EGLBoolean
+ dri2_initialize_wayland(_EGLDriver *drv, _EGLDisplay *disp)
+ {
+    struct dri2_egl_display *dri2_dpy;
+    const __DRIconfig *config;
+-   uint32_t types;
++   uint32_t id, types;
+    int i;
+    static const unsigned int argb_masks[4] =
+       { 0xff0000, 0xff00, 0xff, 0xff000000 };
+    static const unsigned int rgb_masks[4] = { 0xff0000, 0xff00, 0xff, 0 };
+ 
+    drv->API.CreateWindowSurface = dri2_create_window_surface;
++   drv->API.CreatePixmapSurface = dri2_create_pixmap_surface;
+    drv->API.DestroySurface = dri2_destroy_surface;
+    drv->API.SwapBuffers = dri2_swap_buffers;
++   drv->API.CreateImageKHR = dri2_wayland_create_image_khr;
+    drv->API.Terminate = dri2_terminate;
+ 
+    dri2_dpy = malloc(sizeof *dri2_dpy);
+@@ -777,19 +829,22 @@ dri2_initialize_wayland(_EGLDriver *drv, _EGLDisplay *disp)
+       dri2_dpy->wl_dpy = disp->PlatformDisplay;
+    }
+ 
+-   dri2_dpy->wl_queue = wl_display_create_queue(dri2_dpy->wl_dpy);
+-   dri2_dpy->wl_registry = wl_display_get_registry(dri2_dpy->wl_dpy);
+-   wl_proxy_set_queue((struct wl_proxy *) dri2_dpy->wl_registry,
+-                      dri2_dpy->wl_queue);
+-   wl_registry_add_listener(dri2_dpy->wl_registry,
+-                            &registry_listener, dri2_dpy);
+-   if (roundtrip(dri2_dpy) < 0 || dri2_dpy->wl_drm == NULL)
++   id = wl_display_get_global(dri2_dpy->wl_dpy, "wl_drm", 1);
++   if (id == 0)
++      wl_display_roundtrip(dri2_dpy->wl_dpy);
++   id = wl_display_get_global(dri2_dpy->wl_dpy, "wl_drm", 1);
++   if (id == 0)
+       goto cleanup_dpy;
+-
+-   if (roundtrip(dri2_dpy) < 0 || dri2_dpy->fd == -1)
++   dri2_dpy->wl_drm = wl_display_bind(dri2_dpy->wl_dpy, id, &wl_drm_interface);
++   if (!dri2_dpy->wl_drm)
++      goto cleanup_dpy;
++   wl_drm_add_listener(dri2_dpy->wl_drm, &drm_listener, dri2_dpy);
++   wl_display_roundtrip(dri2_dpy->wl_dpy);
++   if (dri2_dpy->fd == -1)
+       goto cleanup_drm;
+ 
+-   if (roundtrip(dri2_dpy) < 0 || !dri2_dpy->authenticated)
++   wl_display_roundtrip(dri2_dpy->wl_dpy);
++   if (!dri2_dpy->authenticated)
+       goto cleanup_fd;
+ 
+    dri2_dpy->driver_name = dri2_get_driver_for_fd(dri2_dpy->fd);
+@@ -816,7 +871,7 @@ dri2_initialize_wayland(_EGLDriver *drv, _EGLDisplay *disp)
+    if (!dri2_create_screen(disp))
+       goto cleanup_driver;
+ 
+-   types = EGL_WINDOW_BIT;
++   types = EGL_WINDOW_BIT | EGL_PIXMAP_BIT;
+    for (i = 0; dri2_dpy->driver_configs[i]; i++) {
+       config = dri2_dpy->driver_configs[i];
+       if (dri2_dpy->formats & HAS_XRGB8888)
+@@ -825,6 +880,8 @@ dri2_initialize_wayland(_EGLDriver *drv, _EGLDisplay *disp)
+ 	 dri2_add_config(disp, config, i + 1, 0, types, NULL, argb_masks);
+    }
+ 
++   disp->Extensions.KHR_image_pixmap = EGL_TRUE;
++
+    disp->Extensions.WL_bind_wayland_display = EGL_TRUE;
+    dri2_dpy->authenticate = dri2_wayland_authenticate;
+ 
+diff --git a/src/egl/wayland/wayland-drm/wayland-drm.c b/src/egl/wayland/wayland-drm/wayland-drm.c
+index d02aab6..45b307f 100644
+--- a/src/egl/wayland/wayland-drm/wayland-drm.c
++++ b/src/egl/wayland/wayland-drm/wayland-drm.c
+@@ -36,6 +36,17 @@
+ #include "wayland-drm.h"
+ #include "wayland-drm-server-protocol.h"
+ 
++/* Git master of Wayland is moving towards a stable version of the
++ * protocol, but breaking from 0.85 in the process.  For the time
++ * being, it's convenient to be able to build Mesa against both master
++ * and 0.85.x of Wayland.  To make this work we'll do a compile-time
++ * version check and work around the difference in API and protocol */
++#if defined (WAYLAND_VERSION_MAJOR) &&		\
++	WAYLAND_VERSION_MAJOR == 0 &&		\
++	WAYLAND_VERSION_MINOR == 85
++#define HAS_WAYLAND_0_85
++#endif
++
+ struct wl_drm {
+ 	struct wl_display *display;
+ 
+@@ -58,10 +69,25 @@ destroy_buffer(struct wl_resource *resource)
+ static void
+ buffer_destroy(struct wl_client *client, struct wl_resource *resource)
+ {
++#ifdef HAS_WAYLAND_0_85
++	wl_resource_destroy(resource, 0);
++#else
+ 	wl_resource_destroy(resource);
++#endif
++}
++
++#ifdef HAS_WAYLAND_0_85
++static void
++buffer_damage(struct wl_client *client, struct wl_resource *buffer,
++              int32_t x, int32_t y, int32_t width, int32_t height)
++{
+ }
++#endif
+ 
+ const static struct wl_buffer_interface drm_buffer_interface = {
++#ifdef HAS_WAYLAND_0_85
++	buffer_damage,
++#endif
+ 	buffer_destroy
+ };
+ 
+diff --git a/src/egl/wayland/wayland-egl/wayland-egl-priv.h b/src/egl/wayland/wayland-egl/wayland-egl-priv.h
+index da25be9..accd2dd 100644
+--- a/src/egl/wayland/wayland-egl/wayland-egl-priv.h
++++ b/src/egl/wayland/wayland-egl/wayland-egl-priv.h
+@@ -24,9 +24,17 @@ struct wl_egl_window {
+ 
+ 	int attached_width;
+ 	int attached_height;
++};
++
++struct wl_egl_pixmap {
++	struct wl_buffer *buffer;
++
++	int width;
++	int height;
++
++	void (*destroy) (struct wl_egl_pixmap *egl_pixmap);
+ 
+-	void *private;
+-	void (*resize_callback)(struct wl_egl_window *, void *);
++	void *driver_private;
+ };
+ 
+ #ifdef  __cplusplus
+diff --git a/src/egl/wayland/wayland-egl/wayland-egl.c b/src/egl/wayland/wayland-egl/wayland-egl.c
+index 8bd49cf..e950b4a 100644
+--- a/src/egl/wayland/wayland-egl/wayland-egl.c
++++ b/src/egl/wayland/wayland-egl/wayland-egl.c
+@@ -13,9 +13,6 @@ wl_egl_window_resize(struct wl_egl_window *egl_window,
+ 	egl_window->height = height;
+ 	egl_window->dx     = dx;
+ 	egl_window->dy     = dy;
+-
+-	if (egl_window->resize_callback)
+-		egl_window->resize_callback(egl_window, egl_window->private);
+ }
+ 
+ WL_EGL_EXPORT struct wl_egl_window *
+@@ -29,8 +26,6 @@ wl_egl_window_create(struct wl_surface *surface,
+ 		return NULL;
+ 
+ 	egl_window->surface = surface;
+-	egl_window->private = NULL;
+-	egl_window->resize_callback = NULL;
+ 	wl_egl_window_resize(egl_window, width, height, 0, 0);
+ 	egl_window->attached_width  = 0;
+ 	egl_window->attached_height = 0;
+@@ -53,3 +48,36 @@ wl_egl_window_get_attached_size(struct wl_egl_window *egl_window,
+ 	if (height)
+ 		*height = egl_window->attached_height;
+ }
++
++WL_EGL_EXPORT struct wl_egl_pixmap *
++wl_egl_pixmap_create(int width, int height, uint32_t flags)
++{
++	struct wl_egl_pixmap *egl_pixmap;
++
++	egl_pixmap = malloc(sizeof *egl_pixmap);
++	if (egl_pixmap == NULL)
++		return NULL;
++
++	egl_pixmap->width   = width;
++	egl_pixmap->height  = height;
++
++	egl_pixmap->destroy = NULL;
++	egl_pixmap->buffer  = NULL;
++	egl_pixmap->driver_private = NULL;
++
++	return egl_pixmap;
++}
++
++WL_EGL_EXPORT void
++wl_egl_pixmap_destroy(struct wl_egl_pixmap *egl_pixmap)
++{
++	if (egl_pixmap->destroy)
++		egl_pixmap->destroy(egl_pixmap);
++	free(egl_pixmap);
++}
++
++WL_EGL_EXPORT struct wl_buffer *
++wl_egl_pixmap_create_buffer(struct wl_egl_pixmap *egl_pixmap)
++{
++	return egl_pixmap->buffer;
++}
+diff --git a/src/gallium/state_trackers/egl/wayland/native_drm.c b/src/gallium/state_trackers/egl/wayland/native_drm.c
+index 4671e33..c6f6197 100644
+--- a/src/gallium/state_trackers/egl/wayland/native_drm.c
++++ b/src/gallium/state_trackers/egl/wayland/native_drm.c
+@@ -182,43 +182,35 @@ static const struct wl_drm_listener drm_listener = {
+    drm_handle_authenticated
+ };
+ 
+-static void
+-registry_handle_global(void *data, struct wl_registry *registry, uint32_t name,
+-                       const char *interface, uint32_t version)
+-{
+-   struct wayland_drm_display *drmdpy = data;
+-
+-   if (strcmp(interface, "wl_drm") == 0) {
+-      drmdpy->wl_drm = wl_registry_bind(registry, name, &wl_drm_interface, 1);
+-      wl_drm_add_listener(drmdpy->wl_drm, &drm_listener, drmdpy);
+-   }
+-}
+-
+-static const struct wl_registry_listener registry_listener = {
+-       registry_handle_global
+-};
+-
+ static boolean
+ wayland_drm_display_init_screen(struct native_display *ndpy)
+ {
+    struct wayland_drm_display *drmdpy = wayland_drm_display(ndpy);
++   uint32_t id;
++
++   id = wl_display_get_global(drmdpy->base.dpy, "wl_drm", 1);
++   if (id == 0)
++      wl_display_roundtrip(drmdpy->base.dpy);
++   id = wl_display_get_global(drmdpy->base.dpy, "wl_drm", 1);
++   if (id == 0)
++      return FALSE;
+ 
+-   drmdpy->base.queue = wl_display_create_queue(drmdpy->base.dpy);
+-   drmdpy->base.registry = wl_display_get_registry(drmdpy->base.dpy);
+-   wl_proxy_set_queue((struct wl_proxy *) drmdpy->base.registry,
+-                      drmdpy->base.queue);
+-   wl_registry_add_listener(drmdpy->base.registry, &registry_listener, drmdpy);
+-   if (wayland_roundtrip(&drmdpy->base) < 0 || drmdpy->wl_drm == NULL)
++   drmdpy->wl_drm = wl_display_bind(drmdpy->base.dpy, id, &wl_drm_interface);
++   if (!drmdpy->wl_drm)
+       return FALSE;
+ 
+    wl_drm_add_listener(drmdpy->wl_drm, &drm_listener, drmdpy);
+-   if (wayland_roundtrip(&drmdpy->base) < 0 || drmdpy->fd == -1)
++   wl_display_roundtrip(drmdpy->base.dpy);
++   if (drmdpy->fd == -1)
+       return FALSE;
+ 
+-   if (wayland_roundtrip(&drmdpy->base) < 0 || !drmdpy->authenticated)
++   wl_display_roundtrip(drmdpy->base.dpy);
++   if (!drmdpy->authenticated)
+       return FALSE;
+ 
+    if (drmdpy->base.formats == 0)
++      wl_display_roundtrip(drmdpy->base.dpy);
++   if (drmdpy->base.formats == 0)
+       return FALSE;
+ 
+    drmdpy->base.base.screen =
+diff --git a/src/gallium/state_trackers/egl/wayland/native_shm.c b/src/gallium/state_trackers/egl/wayland/native_shm.c
+index 5ffe485..574ffce 100644
+--- a/src/gallium/state_trackers/egl/wayland/native_shm.c
++++ b/src/gallium/state_trackers/egl/wayland/native_shm.c
+@@ -133,36 +133,26 @@ static const struct wl_shm_listener shm_listener = {
+    shm_handle_format
+ };
+ 
+-static void
+-registry_handle_global(void *data, struct wl_registry *registry, uint32_t name,
+-                       const char *interface, uint32_t version)
+-{
+-   struct wayland_shm_display *shmdpy = data;
+-
+-   if (strcmp(interface, "wl_shm") == 0) {
+-      shmdpy->wl_shm = wl_registry_bind(registry, name, &wl_shm_interface, 1);
+-      wl_shm_add_listener(shmdpy->wl_shm, &shm_listener, shmdpy);
+-   }
+-}
+-
+-static const struct wl_registry_listener registry_listener = {
+-       registry_handle_global
+-};
+-
+ static boolean
+ wayland_shm_display_init_screen(struct native_display *ndpy)
+ {
+    struct wayland_shm_display *shmdpy = wayland_shm_display(ndpy);
+    struct sw_winsys *winsys = NULL;
++   uint32_t id;
+ 
+-   shmdpy->base.queue = wl_display_create_queue(shmdpy->base.dpy);
+-   shmdpy->base.registry = wl_display_get_registry(shmdpy->base.dpy);
+-   wl_proxy_set_queue((struct wl_proxy *) shmdpy->base.registry,
+-                      shmdpy->base.queue);
+-   wl_registry_add_listener(shmdpy->base.registry, &registry_listener, shmdpy);
+-   if (wayland_roundtrip(&shmdpy->base) < 0 || shmdpy->wl_shm == NULL)
++   id = wl_display_get_global(shmdpy->base.dpy, "wl_shm", 1);
++   if (id == 0)
++      wl_display_iterate(shmdpy->base.dpy, WL_DISPLAY_READABLE);
++   id = wl_display_get_global(shmdpy->base.dpy, "wl_shm", 1);
++   if (id == 0)
+       return FALSE;
+ 
++   shmdpy->wl_shm = wl_display_bind(shmdpy->base.dpy, id, &wl_shm_interface);
++   if (!shmdpy->wl_shm)
++      return FALSE;
++
++   wl_shm_add_listener(shmdpy->wl_shm, &shm_listener, shmdpy);
++
+    if (shmdpy->base.formats == 0)
+       wl_display_roundtrip(shmdpy->base.dpy);
+    if (shmdpy->base.formats == 0)
+diff --git a/src/gallium/state_trackers/egl/wayland/native_wayland.c b/src/gallium/state_trackers/egl/wayland/native_wayland.c
+index 941a094..a7f9cb7 100644
+--- a/src/gallium/state_trackers/egl/wayland/native_wayland.c
++++ b/src/gallium/state_trackers/egl/wayland/native_wayland.c
+@@ -35,37 +35,6 @@
+ 
+ #include "native_wayland.h"
+ 
+-static void
+-sync_callback(void *data, struct wl_callback *callback, uint32_t serial)
+-{
+-   int *done = data;
+-
+-   *done = 1;
+-   wl_callback_destroy(callback);
+-}
+-
+-static const struct wl_callback_listener sync_listener = {
+-   sync_callback
+-};
+-
+-int
+-wayland_roundtrip(struct wayland_display *display)
+-{
+-   struct wl_callback *callback;
+-   int done = 0, ret = 0;
+-
+-   callback = wl_display_sync(display->dpy);
+-   wl_callback_add_listener(callback, &sync_listener, &done);
+-   wl_proxy_set_queue((struct wl_proxy *) callback, display->queue);
+-   while (ret != -1 && !done)
+-      ret = wl_display_dispatch_queue(display->dpy, display->queue);
+-
+-   if (!done)
+-      wl_callback_destroy(callback);
+-
+-   return ret;
+-}
+-
+ static const struct native_event_handler *wayland_event_handler;
+ 
+ const static struct {
+@@ -102,6 +71,7 @@ wayland_display_get_configs(struct native_display *ndpy, int *num_configs)
+             (1 << NATIVE_ATTACHMENT_BACK_LEFT);
+          
+          nconf->window_bit = TRUE;
++         nconf->pixmap_bit = TRUE;
+          
+          nconf->color_format = wayland_formats[i].format;
+          display->num_configs++;
+@@ -123,6 +93,7 @@ static int
+ wayland_display_get_param(struct native_display *ndpy,
+                           enum native_param_type param)
+ {
++   struct wayland_display *display = wayland_display(ndpy);
+    int val;
+ 
+    switch (param) {
+@@ -140,6 +111,49 @@ wayland_display_get_param(struct native_display *ndpy,
+    return val;
+ }
+ 
++static boolean
++wayland_display_get_pixmap_format(struct native_display *ndpy,
++                                  EGLNativePixmapType pix,
++                                  enum pipe_format *format)
++{
++   /* all wl_egl_pixmaps are supported */
++   *format = PIPE_FORMAT_NONE;
++
++   return TRUE;
++}
++
++static void
++wayland_pixmap_destroy(struct wl_egl_pixmap *egl_pixmap)
++{
++   struct pipe_resource *resource = egl_pixmap->driver_private;
++
++   assert(resource);
++
++   pipe_resource_reference(&resource, NULL);
++   if (egl_pixmap->buffer) {
++      wl_buffer_destroy(egl_pixmap->buffer);
++      egl_pixmap->buffer = NULL;
++   }
++
++   egl_pixmap->driver_private = NULL;
++   egl_pixmap->destroy = NULL;
++}
++
++static void
++wayland_pixmap_surface_initialize(struct wayland_surface *surface)
++{
++   struct wayland_display *display = wayland_display(&surface->display->base);
++   const enum native_attachment front_natt = NATIVE_ATTACHMENT_FRONT_LEFT;
++
++   if (surface->pix->buffer != NULL)
++      return;
++
++   surface->pix->buffer  = display->create_buffer(display, surface, front_natt);
++   surface->pix->destroy = wayland_pixmap_destroy;
++   surface->pix->driver_private =
++      resource_surface_get_single_resource(surface->rsurf, front_natt);
++}
++
+ static void
+ wayland_release_pending_resource(void *data,
+                                  struct wl_callback *callback,
+@@ -174,7 +188,7 @@ wayland_window_surface_handle_resize(struct wayland_surface *surface)
+                                  surface->win->width, surface->win->height)) {
+ 
+       if (surface->pending_resource)
+-         wayland_roundtrip(display);
++         wl_display_roundtrip(display->dpy);
+ 
+       if (front_resource) {
+          struct wl_callback *callback;
+@@ -184,7 +198,6 @@ wayland_window_surface_handle_resize(struct wayland_surface *surface)
+ 
+          callback = wl_display_sync(display->dpy);
+          wl_callback_add_listener(callback, &release_buffer_listener, surface);
+-         wl_proxy_set_queue((struct wl_proxy *) callback, display->queue);
+       }
+ 
+       for (i = 0; i < WL_BUFFER_COUNT; ++i) {
+@@ -221,6 +234,9 @@ wayland_surface_validate(struct native_surface *nsurf, uint attachment_mask,
+ 
+    resource_surface_get_size(surface->rsurf, (uint *) width, (uint *) height);
+ 
++   if (surface->type == WL_PIXMAP_SURFACE)
++      wayland_pixmap_surface_initialize(surface);
++
+    return TRUE;
+ }
+ 
+@@ -229,7 +245,7 @@ wayland_frame_callback(void *data, struct wl_callback *callback, uint32_t time)
+ {
+    struct wayland_surface *surface = data;
+ 
+-   surface->frame_callback = NULL;
++   surface->block_swap_buffers = FALSE;
+ 
+    wl_callback_destroy(callback);
+ }
+@@ -253,17 +269,15 @@ wayland_surface_swap_buffers(struct native_surface *nsurf)
+ {
+    struct wayland_surface *surface = wayland_surface(nsurf);
+    struct wayland_display *display = surface->display;
+-   int ret = 0;
++   struct wl_callback *callback;
+ 
+-   while (surface->frame_callback && ret != -1)
+-      ret = wl_display_dispatch_queue(display->dpy, display->queue);
+-   if (ret == -1)
+-      return EGL_FALSE;
++   while (surface->block_swap_buffers)
++      wl_display_iterate(display->dpy, WL_DISPLAY_READABLE);
+ 
+-   surface->frame_callback = wl_surface_frame(surface->win->surface);
+-   wl_callback_add_listener(surface->frame_callback, &frame_listener, surface);
+-   wl_proxy_set_queue((struct wl_proxy *) surface->frame_callback,
+-                      display->queue);
++   surface->block_swap_buffers = TRUE;
++
++   callback = wl_surface_frame(surface->win->surface);
++   wl_callback_add_listener(callback, &frame_listener, surface);
+ 
+    if (surface->type == WL_WINDOW_SURFACE) {
+       resource_surface_swap_buffers(surface->rsurf,
+@@ -335,7 +349,6 @@ wayland_surface_present(struct native_surface *nsurf,
+    if (surface->type == WL_WINDOW_SURFACE) {
+       resource_surface_get_size(surface->rsurf, &width, &height);
+       wl_surface_damage(surface->win->surface, 0, 0, width, height);
+-      wl_surface_commit(surface->win->surface);
+    }
+ 
+    return ret;
+@@ -358,14 +371,66 @@ wayland_surface_destroy(struct native_surface *nsurf)
+          wl_buffer_destroy(surface->buffer[buffer]);
+    }
+ 
+-   if (surface->frame_callback)
+-      wl_callback_destroy(surface->frame_callback);
+-
+    resource_surface_destroy(surface->rsurf);
+    FREE(surface);
+ }
+ 
+ 
++
++static struct native_surface *
++wayland_create_pixmap_surface(struct native_display *ndpy,
++                              EGLNativePixmapType pix,
++                              const struct native_config *nconf)
++{
++   struct wayland_display *display = wayland_display(ndpy);
++   struct wayland_surface *surface;
++   struct wl_egl_pixmap *egl_pixmap = (struct wl_egl_pixmap *) pix;
++   enum native_attachment natt = NATIVE_ATTACHMENT_FRONT_LEFT;
++   uint bind = PIPE_BIND_RENDER_TARGET | PIPE_BIND_SAMPLER_VIEW |
++      PIPE_BIND_DISPLAY_TARGET | PIPE_BIND_SCANOUT;
++
++   surface = CALLOC_STRUCT(wayland_surface);
++   if (!surface)
++      return NULL;
++
++   surface->display = display;
++
++   surface->pending_resource = NULL;
++   surface->type = WL_PIXMAP_SURFACE;
++   surface->pix = egl_pixmap;
++
++   if (nconf)
++      surface->color_format = nconf->color_format;
++   else /* FIXME: derive format from wl_visual */
++      surface->color_format = PIPE_FORMAT_B8G8R8A8_UNORM;
++
++   surface->attachment_mask = (1 << NATIVE_ATTACHMENT_FRONT_LEFT);
++
++   surface->rsurf = resource_surface_create(display->base.screen,
++                                            surface->color_format, bind);
++
++   if (!surface->rsurf) {
++      FREE(surface);
++      return NULL;
++   }
++
++   resource_surface_set_size(surface->rsurf,
++                             egl_pixmap->width, egl_pixmap->height);
++
++   /* the pixmap is already allocated, so import it */
++   if (surface->pix->buffer != NULL)
++      resource_surface_import_resource(surface->rsurf, natt,
++                                       surface->pix->driver_private);
++
++   surface->base.destroy = wayland_surface_destroy;
++   surface->base.present = wayland_surface_present;
++   surface->base.validate = wayland_surface_validate;
++   surface->base.wait = wayland_surface_wait;
++
++   return &surface->base;
++}
++
++
+ static struct native_surface *
+ wayland_create_window_surface(struct native_display *ndpy,
+                               EGLNativeWindowType win,
+@@ -387,7 +452,7 @@ wayland_create_window_surface(struct native_display *ndpy,
+    surface->win = (struct wl_egl_window *) win;
+ 
+    surface->pending_resource = NULL;
+-   surface->frame_callback = NULL;
++   surface->block_swap_buffers = FALSE;
+    surface->type = WL_WINDOW_SURFACE;
+ 
+    surface->buffer[WL_BUFFER_FRONT] = NULL;
+@@ -440,7 +505,10 @@ native_create_display(void *dpy, boolean use_sw)
+ 
+    display->base.get_param = wayland_display_get_param;
+    display->base.get_configs = wayland_display_get_configs;
++   display->base.get_pixmap_format = wayland_display_get_pixmap_format;
++   display->base.copy_to_pixmap = native_display_copy_to_pixmap;
+    display->base.create_window_surface = wayland_create_window_surface;
++   display->base.create_pixmap_surface = wayland_create_pixmap_surface;
+ 
+    display->own_dpy = own_dpy;
+ 
+diff --git a/src/gallium/state_trackers/egl/wayland/native_wayland.h b/src/gallium/state_trackers/egl/wayland/native_wayland.h
+index b623fee..e6a914f 100644
+--- a/src/gallium/state_trackers/egl/wayland/native_wayland.h
++++ b/src/gallium/state_trackers/egl/wayland/native_wayland.h
+@@ -45,8 +45,6 @@ struct wayland_display {
+    struct native_display base;
+ 
+    struct wl_display *dpy;
+-   struct wl_event_queue *queue;
+-   struct wl_registry *registry;
+    boolean own_dpy;
+    /* supported formats */
+    uint32_t formats;
+@@ -67,6 +65,7 @@ enum wayland_buffer_type {
+ 
+ enum wayland_surface_type {
+    WL_WINDOW_SURFACE,
++   WL_PIXMAP_SURFACE,
+    WL_PBUFFER_SURFACE
+ };
+ 
+@@ -75,6 +74,7 @@ struct wayland_surface {
+    struct wayland_display *display;
+ 
+    struct wl_egl_window *win;
++   struct wl_egl_pixmap *pix;
+    enum wayland_surface_type type;
+    int dx, dy;
+    struct resource_surface *rsurf;
+@@ -85,7 +85,7 @@ struct wayland_surface {
+    struct wl_buffer *buffer[WL_BUFFER_COUNT];
+    unsigned int attachment_mask;
+ 
+-   struct wl_callback *frame_callback;
++   boolean block_swap_buffers;
+    boolean premultiplied_alpha;
+ };
+ 
+@@ -119,7 +119,4 @@ struct wayland_display *
+ wayland_create_drm_display(struct wl_display *display,
+                            const struct native_event_handler *event_handler);
+ 
+-int
+-wayland_roundtrip(struct wayland_display *drmdpy);
+-
+ #endif /* _NATIVE_WAYLAND_H_ */
