@@ -59,7 +59,9 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #endif
-
+#ifdef HAVE_MIR_PLATFORM
+#include <mir_client_library.h>
+#endif
 
 /**
  * Map --with-egl-platforms names to platform types.
@@ -74,7 +76,8 @@ static const struct {
    { _EGL_PLATFORM_DRM, "drm" },
    { _EGL_PLATFORM_FBDEV, "fbdev" },
    { _EGL_PLATFORM_NULL, "null" },
-   { _EGL_PLATFORM_ANDROID, "android" }
+   { _EGL_PLATFORM_ANDROID, "android" },
+   { _EGL_PLATFORM_MIR, "mir" },
 };
 
 
@@ -152,6 +155,11 @@ _eglNativePlatformDetectNativeDisplay(EGLNativeDisplayType nativeDisplay)
    /* fbdev is the only platform that can be a file descriptor. */
    if (fstat((intptr_t) nativeDisplay, &buf) == 0 && S_ISCHR(buf.st_mode))
       return _EGL_PLATFORM_FBDEV;
+#endif
+
+#ifdef HAVE_MIR_PLATFORM
+   if (mir_connection_is_valid(nativeDisplay))
+      return _EGL_PLATFORM_MIR;
 #endif
 
    if (_eglPointerIsDereferencable(nativeDisplay)) {
