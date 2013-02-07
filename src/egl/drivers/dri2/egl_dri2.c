@@ -599,6 +599,12 @@ dri2_initialize(_EGLDriver *drv, _EGLDisplay *disp)
          return EGL_TRUE;
       return dri2_initialize_wayland(drv, disp);
 #endif
+#ifdef HAVE_MIR_PLATFORM
+   case _EGL_PLATFORM_MIR:
+      if (disp->Options.TestOnly)
+         return EGL_TRUE;
+      return dri2_initialize_mir(drv, disp);
+#endif
 #endif
 #ifdef HAVE_ANDROID_PLATFORM
    case _EGL_PLATFORM_ANDROID:

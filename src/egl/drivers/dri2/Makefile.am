@@ -62,3 +62,9 @@ if HAVE_EGL_PLATFORM_DRM
 libegl_dri2_la_SOURCES += platform_drm.c
 AM_CFLAGS += -DHAVE_DRM_PLATFORM
 endif
+
+if HAVE_EGL_PLATFORM_MIR
+libegl_dri2_la_SOURCES += platform_mir.c
+AM_CFLAGS += -DHAVE_MIR_PLATFORM
+AM_CFLAGS += $(MIR_CFLAGS)
+endif
