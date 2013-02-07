@@ -44,6 +44,8 @@
 #include "gbm_driint.h"
 
 #include "gbmint.h"
+#include <xf86drm.h>
+
 
 /* For importing wl_buffer */
 #if HAVE_WAYLAND_PLATFORM
@@ -281,9 +283,11 @@ gbm_dri_is_format_supported(struct gbm_device *gbm,
    switch (format) {
    case GBM_BO_FORMAT_XRGB8888:
    case GBM_FORMAT_XRGB8888:
+   case GBM_FORMAT_XBGR8888:
       break;
    case GBM_BO_FORMAT_ARGB8888:
    case GBM_FORMAT_ARGB8888:
+   case GBM_FORMAT_ABGR8888:
       if (usage & GBM_BO_USE_SCANOUT)
          return 0;
       break;
@@ -347,6 +351,9 @@ gbm_dri_to_gbm_format(uint32_t dri_format)
       break;
    case __DRI_IMAGE_FORMAT_ABGR8888:
       ret = GBM_FORMAT_ABGR8888;
+      break;
+   case __DRI_IMAGE_FORMAT_XBGR8888:
+      ret = GBM_FORMAT_XBGR8888;
       break;
    default:
       ret = 0;
@@ -545,9 +552,14 @@ gbm_dri_bo_create(struct gbm_device *gbm,
    case GBM_FORMAT_ABGR8888:
       dri_format = __DRI_IMAGE_FORMAT_ABGR8888;
       break;
+   case GBM_FORMAT_XBGR8888:
+      dri_format = __DRI_IMAGE_FORMAT_XBGR8888;
+      break;
    default:
       return NULL;
    }
+
+   bo->base.base.format = gbm_dri_to_gbm_format(dri_format);
 
    if (usage & GBM_BO_USE_SCANOUT)
       dri_use |= __DRI_IMAGE_USE_SCANOUT;
