@@ -467,9 +467,8 @@ create_dumb(struct gbm_device *gbm,
    struct drm_mode_destroy_dumb destroy_arg;
    int ret;
 
-   if (!(usage & GBM_BO_USE_CURSOR_64X64))
-      return NULL;
-   if (format != GBM_FORMAT_ARGB8888)
+   if ((format != GBM_FORMAT_ARGB8888) &&
+       (format != GBM_FORMAT_XRGB8888))
       return NULL;
 
    bo = calloc(1, sizeof *bo);
