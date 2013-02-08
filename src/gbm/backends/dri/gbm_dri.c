@@ -483,6 +483,7 @@ create_dumb(struct gbm_device *gbm,
    if (ret)
       goto free_bo;
 
+   bo->base.base.format = format;
    bo->base.base.gbm = gbm;
    bo->base.base.width = width;
    bo->base.base.height = height;
