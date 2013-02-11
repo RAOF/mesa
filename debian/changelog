@@ -1,4 +1,4 @@
-mesa (9.0.2-0ubuntu0.1) UNRELEASED; urgency=low
+mesa (9.0.2-0ubuntu0.1) quantal-proposed; urgency=low
 
   * Merge package from raring.
   * Add patch to build against quantal's wayland again
