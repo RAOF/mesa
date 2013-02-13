@@ -322,9 +322,9 @@ gbm_dri_bo_destroy(struct gbm_bo *_bo)
    struct gbm_dri_bo *bo = gbm_dri_bo(_bo);
    struct drm_mode_destroy_dumb arg;
 
-   if (bo->image != NULL) {
+   if (bo->image)
       dri->image->destroyImage(bo->image);
-   } else {
+   if (bo->map) {
       munmap(bo->map, bo->size);
       memset(&arg, 0, sizeof(arg));
       arg.handle = bo->handle;
@@ -536,6 +536,25 @@ create_dumb(struct gbm_device *gbm,
    if (bo->map == MAP_FAILED)
       goto destroy_dumb;
 
+   /* Should be gated on GBM_BO_USE_RENDERING, once Mir passes that down */
+   {
+      struct drm_gem_flink flink_arg;
+      memset(&flink_arg, 0, sizeof(flink_arg));
+      flink_arg.handle = bo->handle;
+      ret = drmIoctl(dri->base.base.fd, DRM_IOCTL_GEM_FLINK, &flink_arg);
+      if (ret)
+         goto destroy_dumb;
+
+      bo->image = dri->image->createImageFromName(dri->screen,
+                                                  width, height,
+                                                  gbm_to_dri_format(format),
+                                                  flink_arg.name,
+                                                  bo->base.base.stride / 4,
+                                                  bo);
+
+      if (!bo->image)
+         goto destroy_dumb;
+   }
    return &bo->base.base;
 
 destroy_dumb:
