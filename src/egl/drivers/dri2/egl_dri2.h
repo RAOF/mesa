@@ -65,6 +65,10 @@
 
 #endif /* HAVE_ANDROID_PLATFORM */
 
+#ifdef HAVE_MIR_PLATFORM
+#include <mir_client_library.h>
+#endif
+
 #include "eglconfig.h"
 #include "eglcontext.h"
 #include "egldisplay.h"
@@ -134,6 +138,10 @@ struct dri2_egl_display
    int			     formats;
 #endif
 
+#ifdef HAVE_MIR_PLATFORM
+   MirConnection            *mir_conn;
+#endif
+
    int (*authenticate) (_EGLDisplay *disp, uint32_t id);
 };
 
@@ -182,7 +190,9 @@ struct dri2_egl_surface
    struct gbm_dri_surface *gbm_surf;
 #endif
 
-#if defined(HAVE_WAYLAND_PLATFORM) || defined(HAVE_DRM_PLATFORM)
+#if defined(HAVE_WAYLAND_PLATFORM) \
+   || defined(HAVE_DRM_PLATFORM) \
+   || defined(HAVE_MIR_PLATFORM)
    __DRIbuffer           *dri_buffers[__DRI_BUFFER_COUNT];
    struct {
 #ifdef HAVE_WAYLAND_PLATFORM
@@ -203,6 +213,10 @@ struct dri2_egl_surface
 
    /* EGL-owned buffers */
    __DRIbuffer           *local_buffers[__DRI_BUFFER_COUNT];
+#endif
+
+#ifdef HAVE_MIR_PLATFORM
+   MirSurface            *mir_surf;
 #endif
 };
 
@@ -264,6 +278,9 @@ dri2_initialize_wayland(_EGLDriver *drv, _EGLDisplay *disp);
 
 EGLBoolean
 dri2_initialize_android(_EGLDriver *drv, _EGLDisplay *disp);
+
+EGLBoolean
+dri2_initialize_mir(_EGLDriver *drv, _EGLDisplay *disp);
 
 char *
 dri2_get_driver_for_fd(int fd);
