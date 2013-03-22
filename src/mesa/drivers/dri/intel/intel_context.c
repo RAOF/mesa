@@ -1099,16 +1099,19 @@ intel_process_dri2_buffer(struct intel_context *intel,
     * use of a mapping of the buffer involves a bunch of page faulting which is
     * moderately expensive.
     */
+   /* TODO: Is caching based on fd possible or useful? */
    if (num_samples == 0) {
        if (rb->mt &&
            rb->mt->region &&
-           rb->mt->region->name == buffer->name)
+           rb->mt->region->name == buffer->name &&
+           rb->mt->region->name != 0)
           return;
    } else {
        if (rb->mt &&
            rb->mt->singlesample_mt &&
            rb->mt->singlesample_mt->region &&
-           rb->mt->singlesample_mt->region->name == buffer->name)
+           rb->mt->singlesample_mt->region->name == buffer->name &&
+           rb->mt->singlesample_mt->region->name != 0)
           return;
    }
 
@@ -1133,6 +1136,7 @@ intel_process_dri2_buffer(struct intel_context *intel,
                                          buffer->cpp,
                                          drawable->w,
                                          drawable->h,
+                                         buffer->pitch,
                                          buffer->fd,
                                          buffer_name);
    }
