@@ -133,17 +133,6 @@ dri2_flush_front_buffer(__DRIdrawable * driDrawable, void *loaderPrivate)
 }
 
 static void
-mir_copy_back_to_front(struct dri2_egl_surface *surf)
-{
-   memcpy(surf->dri_buffers[__DRI_BUFFER_FRONT_LEFT],
-          surf->dri_buffers[__DRI_BUFFER_BACK_LEFT],
-          sizeof(*surf->dri_buffers[__DRI_BUFFER_BACK_LEFT]));
-
-   surf->dri_buffers[__DRI_BUFFER_FRONT_LEFT]->attachment =
-      __DRI_BUFFER_FRONT_LEFT;
-}
-
-static void
 mir_populate_colour_buffers(struct dri2_egl_surface *surf)
 {
    MirBufferPackage buffer_package;
@@ -151,13 +140,10 @@ mir_populate_colour_buffers(struct dri2_egl_surface *surf)
    mir_surface_get_current_buffer(surf->mir_surf, &buffer_package);
    /* We expect no data items, and (for the moment) one PRIME fd */
    assert(buffer_package.data_items == 0);
-   assert(buffer_package.fds == 1);
-
-   /* Frontbuffer hack; Mir doesn't give us access to the front buffer */
-   mir_copy_back_to_front(surf);
+   assert(buffer_package.fd_items == 1);
 
    surf->dri_buffers[__DRI_BUFFER_BACK_LEFT]->name = 0;
-   surf->dri_buffers[__DRI_BUFFER_BACK_LEFT]->fd = buffer_package.fds[0];
+   surf->dri_buffers[__DRI_BUFFER_BACK_LEFT]->fd = buffer_package.fd[0];
    /* Man, I hope that Intel's just being funky when they multiply pitch by
       cpp */
    surf->dri_buffers[__DRI_BUFFER_BACK_LEFT]->pitch = buffer_package.stride;
@@ -203,8 +189,6 @@ dri2_create_mir_window_surface(_EGLDriver *drv, _EGLDisplay *disp,
    dri2_surf->dri_buffers[__DRI_BUFFER_BACK_LEFT]->cpp = 4;
 
    mir_populate_colour_buffers(dri2_surf);
-   /* Hack: this is not actually the front buffer, but we can't get it */
-   mir_copy_back_to_front(dri2_surf);
 
    dri2_surf->dri_drawable = 
       (*dri2_dpy->dri2->createNewDrawable) (dri2_dpy->dri_screen,
@@ -268,9 +252,10 @@ dri2_swap_buffers(_EGLDriver *drv, _EGLDisplay *disp, _EGLSurface *draw)
 
    mir_wait_for(mir_surface_next_buffer(dri2_surf->mir_surf, surface_callback, dri2_surf));
 
+   (*dri2_dpy->flush->flush)(dri2_surf->dri_drawable);
+
    mir_populate_colour_buffers(dri2_surf);
 
-   (*dri2_dpy->flush->flush)(dri2_surf->dri_drawable);
    (*dri2_dpy->flush->invalidate)(dri2_surf->dri_drawable);
 
    return EGL_TRUE;
