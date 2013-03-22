@@ -149,13 +149,15 @@ mir_populate_colour_buffers(struct dri2_egl_surface *surf)
    MirBufferPackage buffer_package;
    
    mir_surface_get_current_buffer(surf->mir_surf, &buffer_package);
-   /* We expect [name, pitch] in our buffer */
-   assert(buffer_package.data_items == 1);
+   /* We expect no data items, and (for the moment) one PRIME fd */
+   assert(buffer_package.data_items == 0);
+   assert(buffer_package.fds == 1);
 
    /* Frontbuffer hack; Mir doesn't give us access to the front buffer */
    mir_copy_back_to_front(surf);
 
-   surf->dri_buffers[__DRI_BUFFER_BACK_LEFT]->name = buffer_package.data[0];
+   surf->dri_buffers[__DRI_BUFFER_BACK_LEFT]->name = 0;
+   surf->dri_buffers[__DRI_BUFFER_BACK_LEFT]->fd = buffer_package.fds[0];
    /* Man, I hope that Intel's just being funky when they multiply pitch by
       cpp */
    surf->dri_buffers[__DRI_BUFFER_BACK_LEFT]->pitch = buffer_package.stride;
@@ -339,7 +341,7 @@ dri2_initialize_mir(_EGLDriver *drv, _EGLDisplay *disp)
       goto cleanup_conn;
 
    dri2_dpy->dri2_loader_extension.base.name = __DRI_DRI2_LOADER;
-   dri2_dpy->dri2_loader_extension.base.version = 3;
+   dri2_dpy->dri2_loader_extension.base.version = 4;
    dri2_dpy->dri2_loader_extension.getBuffers = dri2_get_buffers;
    dri2_dpy->dri2_loader_extension.flushFrontBuffer = dri2_flush_front_buffer;
    dri2_dpy->dri2_loader_extension.getBuffersWithFormat =
