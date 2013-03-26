@@ -66,7 +66,8 @@
 #endif /* HAVE_ANDROID_PLATFORM */
 
 #ifdef HAVE_MIR_PLATFORM
-#include <mir_client_library.h>
+#include <mir_toolkit/mir_client_library.h>
+#include <mir_toolkit/mesa/native_display.h>
 #endif
 
 #include "eglconfig.h"
@@ -140,7 +141,7 @@ struct dri2_egl_display
 #endif
 
 #ifdef HAVE_MIR_PLATFORM
-   MirConnection            *mir_conn;
+  MirMesaEGLNativeDisplay *mir_disp;
 #endif
 
    int (*authenticate) (_EGLDisplay *disp, uint32_t id);
@@ -219,6 +220,8 @@ struct dri2_egl_surface
 
 #ifdef HAVE_MIR_PLATFORM
    MirSurface            *mir_surf;
+   // TODO: Awkward to copy
+   MirMesaEGLNativeDisplay *mir_disp;
 #endif
 };
 

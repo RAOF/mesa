@@ -25,7 +25,8 @@
  *    Christopher James Halse Rogers <christopher.halse.rogers@canonical.com>
  */
 
-#include <mir_client_library.h>
+#include <mir_toolkit/mir_client_library.h>
+#include <mir_toolkit/mesa/native_display.h>
 
 #include "egl_dri2.h"
 
@@ -147,8 +148,10 @@ static void
 mir_populate_colour_buffers(struct dri2_egl_surface *surf)
 {
    MirBufferPackage buffer_package;
-   
-   mir_surface_get_current_buffer(surf->mir_surf, &buffer_package);
+
+   surf->mir_disp->surface_get_current_buffer(surf->mir_disp,
+                                              (EGLNativeWindowType)surf->mir_surf,
+                                              &buffer_package);
    /* We expect [name, pitch] in our buffer */
    assert(buffer_package.data_items == 1);
 
@@ -185,8 +188,11 @@ dri2_create_mir_window_surface(_EGLDriver *drv, _EGLDisplay *disp,
    if (!_eglInitSurface(&dri2_surf->base, disp, EGL_WINDOW_BIT, conf, attrib_list))
       goto cleanup_surf;
 
+   // TODO: Strange to copy this...
+   dri2_surf->mir_disp = dri2_dpy->mir_disp;
    dri2_surf->mir_surf = (MirSurface *)window;
-   mir_surface_get_parameters(dri2_surf->mir_surf, &surf_params);
+   dri2_surf->mir_disp->surface_get_parameters(dri2_surf->mir_disp, (EGLNativeWindowType)dri2_surf->mir_surf,
+                                               &surf_params);
    dri2_surf->base.Width = surf_params.width;
    dri2_surf->base.Height = surf_params.height;
 
@@ -247,13 +253,6 @@ dri2_destroy_mir_surface(_EGLDriver *drv, _EGLDisplay *disp, _EGLSurface *surf)
    return EGL_TRUE;
 }
 
-static void
-surface_callback(MirSurface *surface, void *ctx)
-{
-   struct dri2_egl_surface *dri2_surf = dri2_egl_surface(ctx);
-
-}
-
 /**
  * Called via eglSwapBuffers(), drv->API.SwapBuffers().
  */
@@ -264,7 +263,7 @@ dri2_swap_buffers(_EGLDriver *drv, _EGLDisplay *disp, _EGLSurface *draw)
    struct dri2_egl_surface *dri2_surf = dri2_egl_surface(draw);
    struct dri2_egl_driver *dri2_drv = dri2_egl_driver(drv);
 
-   mir_wait_for(mir_surface_next_buffer(dri2_surf->mir_surf, surface_callback, dri2_surf));
+   dri2_surf->mir_disp->surface_advance_buffer(dri2_surf->mir_disp, (EGLNativeWindowType)dri2_surf->mir_surf);
 
    mir_populate_colour_buffers(dri2_surf);
 
@@ -278,7 +277,7 @@ static void connection_callback(MirConnection *conn, void *context)
 {
    struct dri2_egl_display *dri2_dpy = context;
 
-   dri2_dpy->mir_conn = conn;
+   dri2_dpy->mir_disp = (MirMesaEGLNativeDisplay *)mir_connection_get_egl_native_display(conn);
 }
 
 static int
@@ -317,16 +316,18 @@ dri2_initialize_mir(_EGLDriver *drv, _EGLDisplay *disp)
       mir_wait_for(mir_connect("some_socket_file", "EGL Client",
                                connection_callback, dri2_dpy));
    } else {
-      dri2_dpy->mir_conn = (MirConnection *)disp->PlatformDisplay;
+      dri2_dpy->mir_disp = (MirConnection *)disp->PlatformDisplay;
    }
 
-   if (!mir_connection_is_valid(dri2_dpy->mir_conn)) {
-      _eglLog(_EGL_WARNING, "DRI2: mir_connect failed: %s",
-              mir_connection_get_error_message(dri2_dpy->mir_conn));
-      goto cleanup_dpy;
-   }
 
-   mir_connection_get_platform(dri2_dpy->mir_conn, &platform);
+// TODO: What to do about mir_connection_is_valid?
+//   if (!mir_connection_is_valid(dri2_dpy->mir_conn)) {
+//      _eglLog(_EGL_WARNING, "DRI2: mir_connect failed: %s",
+//              mir_connection_get_error_message(dri2_dpy->mir_conn));
+//      goto cleanup_dpy;
+//   }
+
+   dri2_dpy->mir_disp->display_get_platform(dri2_dpy->mir_disp, &platform);
    dri2_dpy->fd = platform.fd[0];
    dri2_dpy->driver_name = dri2_get_driver_for_fd(dri2_dpy->fd);
    dri2_dpy->device_name = dri2_get_device_name_for_fd(dri2_dpy->fd);
@@ -367,8 +368,9 @@ dri2_initialize_mir(_EGLDriver *drv, _EGLDisplay *disp)
    return EGL_TRUE;
 
  cleanup_conn:
-   if (disp->PlatformDisplay == NULL)
-      mir_connection_release(dri2_dpy->mir_conn);
+   // TODO: Release NativeDisplay...
+//   if (disp->PlatformDisplay == NULL)
+//      mir_connection_release(dri2_dpy->mir_conn);
  cleanup_dpy:
    free(dri2_dpy);
 
