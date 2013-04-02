@@ -27,33 +27,9 @@
 #include "nv50/codegen/nv50_ir_driver.h"
 #include "nve4_compute.h"
 
-/* If only they told use the actual semantic instead of just GENERIC ... */
-static void
-nvc0_mesa_varying_hack(struct nv50_ir_varying *var)
-{
-   unsigned c;
-
-   if (var->sn != TGSI_SEMANTIC_GENERIC)
-      return;
-
-   if (var->si <= 7) /* gl_TexCoord */
-      for (c = 0; c < 4; ++c)
-         var->slot[c] = (0x300 + var->si * 0x10 + c * 0x4) / 4;
-   else
-   if (var->si == 9) /* gl_PointCoord */
-      for (c = 0; c < 4; ++c)
-         var->slot[c] = (0x2e0 + c * 0x4) / 4;
-   else
-   if (var->si <= 39)
-      for (c = 0; c < 4; ++c) /* move down user varyings (first has index 8) */
-         var->slot[c] -= 0x80 / 4;
-   else {
-      NOUVEAU_ERR("too many varyings / invalid location: %u !\n", var->si);
-      for (c = 0; c < 4; ++c)
-         var->slot[c] = (0x270 + c * 0x4) / 4; /* catch invalid indices */
-   }
-}
-
+/* NOTE: Using a[0x270] in FP may cause an error even if we're using less than
+ * 124 scalar varying values.
+ */
 static uint32_t
 nvc0_shader_input_address(unsigned sn, unsigned si, unsigned ubase)
 {
@@ -63,17 +39,17 @@ nvc0_shader_input_address(unsigned sn, unsigned si, unsigned ubase)
    case TGSI_SEMANTIC_PSIZE:        return 0x06c;
    case TGSI_SEMANTIC_POSITION:     return 0x070;
    case TGSI_SEMANTIC_GENERIC:      return ubase + si * 0x10;
-   case TGSI_SEMANTIC_FOG:          return 0x270;
+   case TGSI_SEMANTIC_FOG:          return 0x2e8;
    case TGSI_SEMANTIC_COLOR:        return 0x280 + si * 0x10;
    case TGSI_SEMANTIC_BCOLOR:       return 0x2a0 + si * 0x10;
    case NV50_SEMANTIC_CLIPDISTANCE: return 0x2c0 + si * 0x4;
    case TGSI_SEMANTIC_CLIPDIST:     return 0x2c0 + si * 0x10;
-   case TGSI_SEMANTIC_CLIPVERTEX:   return 0x260;
-   case NV50_SEMANTIC_POINTCOORD:   return 0x2e0;
+   case TGSI_SEMANTIC_CLIPVERTEX:   return 0x270;
+   case TGSI_SEMANTIC_PCOORD:       return 0x2e0;
    case NV50_SEMANTIC_TESSCOORD:    return 0x2f0;
    case TGSI_SEMANTIC_INSTANCEID:   return 0x2f8;
    case TGSI_SEMANTIC_VERTEXID:     return 0x2fc;
-   case NV50_SEMANTIC_TEXCOORD:     return 0x300 + si * 0x10;
+   case TGSI_SEMANTIC_TEXCOORD:     return 0x300 + si * 0x10;
    case TGSI_SEMANTIC_FACE:         return 0x3fc;
    case NV50_SEMANTIC_INVOCATIONID: return ~0;
    default:
@@ -93,13 +69,13 @@ nvc0_shader_output_address(unsigned sn, unsigned si, unsigned ubase)
    case TGSI_SEMANTIC_PSIZE:         return 0x06c;
    case TGSI_SEMANTIC_POSITION:      return 0x070;
    case TGSI_SEMANTIC_GENERIC:       return ubase + si * 0x10;
-   case TGSI_SEMANTIC_FOG:           return 0x270;
+   case TGSI_SEMANTIC_FOG:           return 0x2e8;
    case TGSI_SEMANTIC_COLOR:         return 0x280 + si * 0x10;
    case TGSI_SEMANTIC_BCOLOR:        return 0x2a0 + si * 0x10;
    case NV50_SEMANTIC_CLIPDISTANCE:  return 0x2c0 + si * 0x4;
    case TGSI_SEMANTIC_CLIPDIST:      return 0x2c0 + si * 0x10;
-   case TGSI_SEMANTIC_CLIPVERTEX:    return 0x260;
-   case NV50_SEMANTIC_TEXCOORD:      return 0x300 + si * 0x10;
+   case TGSI_SEMANTIC_CLIPVERTEX:    return 0x270;
+   case TGSI_SEMANTIC_TEXCOORD:      return 0x300 + si * 0x10;
    case TGSI_SEMANTIC_EDGEFLAG:      return ~0;
    default:
       assert(!"invalid TGSI output semantic");
@@ -149,8 +125,6 @@ nvc0_sp_assign_input_slots(struct nv50_ir_prog_info *info)
 
       for (c = 0; c < 4; ++c)
          info->in[i].slot[c] = (offset + c * 0x4) / 4;
-
-      nvc0_mesa_varying_hack(&info->in[i]);
    }
 
    return 0;
@@ -194,8 +168,6 @@ nvc0_sp_assign_output_slots(struct nv50_ir_prog_info *info)
 
       for (c = 0; c < 4; ++c)
          info->out[i].slot[c] = (offset + c * 0x4) / 4;
-
-      nvc0_mesa_varying_hack(&info->out[i]);
    }
 
    return 0;
@@ -471,7 +443,7 @@ nvc0_fp_gen_header(struct nvc0_program *fp, struct nv50_ir_prog_info *info)
          } else
          if (info->in[i].slot[0] >= (0x2c0 / 4) &&
              info->in[i].slot[0] <= (0x2fc / 4)) {
-            fp->hdr[14] |= (1 << (a - 0x280 / 4)) & 0x03ff0000;
+            fp->hdr[14] |= (1 << (a - 0x280 / 4)) & 0x07ff0000;
          } else {
             if (info->in[i].slot[c] < (0x040 / 4) ||
                 info->in[i].slot[c] > (0x380 / 4))

@@ -114,6 +114,7 @@ nvc0_screen_get_param(struct pipe_screen *pscreen, enum pipe_cap param)
    case PIPE_CAP_TWO_SIDED_STENCIL:
    case PIPE_CAP_DEPTH_CLIP_DISABLE:
    case PIPE_CAP_POINT_SPRITE:
+   case PIPE_CAP_TGSI_TEXCOORD:
       return 1;
    case PIPE_CAP_SM3:
       return 1;
@@ -178,6 +179,8 @@ nvc0_screen_get_param(struct pipe_screen *pscreen, enum pipe_cap param)
       return 0;
    case PIPE_CAP_COMPUTE:
       return (class_3d >= NVE4_3D_CLASS) ? 1 : 0;
+   case PIPE_CAP_PREFER_BLIT_BASED_TEXTURE_TRANSFER:
+      return 1;
    default:
       NOUVEAU_ERR("unknown PIPE_CAP %d\n", param);
       return 0;
@@ -220,9 +223,17 @@ nvc0_screen_get_shader_param(struct pipe_screen *pscreen, unsigned shader,
    case PIPE_SHADER_CAP_MAX_INPUTS:
       if (shader == PIPE_SHADER_VERTEX)
          return 32;
+      /* NOTE: These only count our slots for GENERIC varyings.
+       * The address space may be larger, but the actual hard limit seems to be
+       * less than what the address space layout permits, so don't add TEXCOORD,
+       * COLOR, etc. here.
+       */
       if (shader == PIPE_SHADER_FRAGMENT)
-         return (0x200 + 0x20 + 0x80) / 16; /* generic + colors + TexCoords */
-      return (0x200 + 0x40 + 0x80) / 16; /* without 0x60 for per-patch inputs */
+         return 0x1f0 / 16;
+      /* Actually this counts CLIPVERTEX, which occupies the last generic slot,
+       * and excludes 0x60 per-patch inputs.
+       */
+      return 0x200 / 16;
    case PIPE_SHADER_CAP_MAX_CONSTS:
       return 65536 / 16;
    case PIPE_SHADER_CAP_MAX_CONST_BUFFERS:

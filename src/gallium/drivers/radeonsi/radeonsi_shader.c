@@ -33,6 +33,7 @@
 #include "gallivm/lp_bld_intr.h"
 #include "gallivm/lp_bld_logic.h"
 #include "gallivm/lp_bld_tgsi.h"
+#include "gallivm/lp_bld_arit.h"
 #include "radeon_llvm.h"
 #include "radeon_llvm_emit.h"
 #include "tgsi/tgsi_info.h"
@@ -354,11 +355,10 @@ static LLVMValueRef fetch_constant(
 {
 	struct si_shader_context *si_shader_ctx = si_shader_context(bld_base);
 	struct lp_build_context * base = &bld_base->base;
-	unsigned idx;
 
-	LLVMValueRef const_ptr;
-	LLVMValueRef offset;
-	LLVMValueRef load;
+	LLVMValueRef ptr;
+	LLVMValueRef args[2];
+	LLVMValueRef result;
 
 	if (swizzle == LP_CHAN_ALL) {
 		unsigned chan;
@@ -369,23 +369,23 @@ static LLVMValueRef fetch_constant(
 		return lp_build_gather_values(bld_base->base.gallivm, values, 4);
 	}
 
-	/* currently not supported */
+	/* Load the resource descriptor */
+	ptr = LLVMGetParam(si_shader_ctx->radeon_bld.main_fn, SI_PARAM_CONST);
+	args[0] = build_indexed_load(base->gallivm, ptr, bld_base->uint_bld.zero);
+
+	args[1] = lp_build_const_int32(base->gallivm, (reg->Register.Index * 4 + swizzle) * 4);
 	if (reg->Register.Indirect) {
-		assert(0);
-		load = lp_build_const_int32(base->gallivm, 0);
-		return bitcast(bld_base, type, load);
+		const struct tgsi_ind_register *ireg = &reg->Indirect;
+		LLVMValueRef addr = si_shader_ctx->radeon_bld.soa.addr[ireg->Index][ireg->Swizzle];
+		LLVMValueRef idx = LLVMBuildLoad(base->gallivm->builder, addr, "load addr reg");
+		idx = lp_build_mul_imm(&bld_base->uint_bld, idx, 16);
+		args[1] = lp_build_add(&bld_base->uint_bld, idx, args[1]);
 	}
 
-	const_ptr = LLVMGetParam(si_shader_ctx->radeon_bld.main_fn, SI_PARAM_CONST);
+	result = build_intrinsic(base->gallivm->builder, "llvm.SI.load.const", base->elem_type,
+                                 args, 2, LLVMReadOnlyAttribute | LLVMNoUnwindAttribute);
 
-	/* XXX: This assumes that the constant buffer is not packed, so
-	 * CONST[0].x will have an offset of 0 and CONST[1].x will have an
-	 * offset of 4. */
-	idx = (reg->Register.Index * 4) + swizzle;
-	offset = lp_build_const_int32(base->gallivm, idx);
-
-	load = build_indexed_load(base->gallivm, const_ptr, offset);
-	return bitcast(bld_base, type, load);
+	return bitcast(bld_base, type, result);
 }
 
 /* Initialize arguments for the shader export intrinsic */
@@ -931,8 +931,8 @@ static void create_function(struct si_shader_context *si_shader_ctx)
 	v2i32 = LLVMVectorType(i32, 2);
 	v3i32 = LLVMVectorType(i32, 3);
 
-	params[SI_PARAM_CONST] = LLVMPointerType(f32, CONST_ADDR_SPACE);
-	params[SI_PARAM_SAMPLER] = LLVMPointerType(LLVMVectorType(i8, 16), CONST_ADDR_SPACE);
+	params[SI_PARAM_CONST] = LLVMPointerType(LLVMVectorType(i8, 16), CONST_ADDR_SPACE);
+	params[SI_PARAM_SAMPLER] = params[SI_PARAM_CONST];
 	params[SI_PARAM_RESOURCE] = LLVMPointerType(LLVMVectorType(i8, 32), CONST_ADDR_SPACE);
 
 	if (si_shader_ctx->type == TGSI_PROCESSOR_VERTEX) {
@@ -996,11 +996,6 @@ int si_pipe_shader_create(
 	bld_base = &si_shader_ctx.radeon_bld.soa.bld_base;
 
 	tgsi_scan_shader(sel->tokens, &shader_info);
-	if (shader_info.indirect_files != 0) {
-		fprintf(stderr, "Indirect addressing not fully handled yet\n");
-		return -ENOSYS;
-	}
-
 	shader->shader.uses_kill = shader_info.uses_kill;
 	bld_base->info = &shader_info;
 	bld_base->emit_fetch_funcs[TGSI_FILE_CONSTANT] = fetch_constant;

@@ -153,6 +153,7 @@ enum brw_state_id {
    BRW_STATE_PROGRAM_CACHE,
    BRW_STATE_STATE_BASE_ADDRESS,
    BRW_STATE_SOL_INDICES,
+   BRW_STATE_VUE_MAP_GEOM_OUT,
 };
 
 #define BRW_NEW_URB_FENCE               (1 << BRW_STATE_URB_FENCE)
@@ -182,6 +183,7 @@ enum brw_state_id {
 #define BRW_NEW_PROGRAM_CACHE		(1 << BRW_STATE_PROGRAM_CACHE)
 #define BRW_NEW_STATE_BASE_ADDRESS	(1 << BRW_STATE_STATE_BASE_ADDRESS)
 #define BRW_NEW_SOL_INDICES		(1 << BRW_STATE_SOL_INDICES)
+#define BRW_NEW_VUE_MAP_GEOM_OUT	(1 << BRW_STATE_VUE_MAP_GEOM_OUT)
 
 struct brw_state_flags {
    /** State update flags signalled by mesa internals */
@@ -331,13 +333,14 @@ typedef enum
    BRW_VARYING_SLOT_NDC = VARYING_SLOT_MAX,
    BRW_VARYING_SLOT_POS_DUPLICATE,
    BRW_VARYING_SLOT_PAD,
-   /*
-    * It's actually not a vert_result but just a _mark_ to let sf aware that
-    * he need do something special to handle gl_PointCoord builtin variable
-    * correctly. see compile_sf_prog() for more info.
+   /**
+    * Technically this is not a varying but just a placeholder that
+    * compile_sf_prog() inserts into its VUE map to cause the gl_PointCoord
+    * builtin variable to be compiled correctly. see compile_sf_prog() for
+    * more info.
     */
    BRW_VARYING_SLOT_PNTC,
-   BRW_VARYING_SLOT_MAX
+   BRW_VARYING_SLOT_COUNT
 } brw_varying_slot;
 
 
@@ -354,23 +357,30 @@ typedef enum
  */
 struct brw_vue_map {
    /**
+    * Bitfield representing all varying slots that are (a) stored in this VUE
+    * map, and (b) actually written by the shader.  Does not include any of
+    * the additional varying slots defined in brw_varying_slot.
+    */
+   GLbitfield64 slots_valid;
+
+   /**
     * Map from gl_varying_slot value to VUE slot.  For gl_varying_slots that are
     * not stored in a slot (because they are not written, or because
     * additional processing is applied before storing them in the VUE), the
     * value is -1.
     */
-   int vert_result_to_slot[BRW_VARYING_SLOT_MAX];
+   signed char varying_to_slot[BRW_VARYING_SLOT_COUNT];
 
    /**
     * Map from VUE slot to gl_varying_slot value.  For slots that do not
     * directly correspond to a gl_varying_slot, the value comes from
     * brw_varying_slot.
     *
-    * For slots that are not in use, the value is BRW_VARYING_SLOT_MAX (this
-    * simplifies code that uses the value stored in slot_to_vert_result to
+    * For slots that are not in use, the value is BRW_VARYING_SLOT_COUNT (this
+    * simplifies code that uses the value stored in slot_to_varying to
     * create a bit mask).
     */
-   int slot_to_vert_result[BRW_VARYING_SLOT_MAX];
+   signed char slot_to_varying[BRW_VARYING_SLOT_COUNT];
 
    /**
     * Total number of VUE slots in use
@@ -390,10 +400,10 @@ static inline GLuint brw_vue_slot_to_offset(GLuint slot)
  * Convert a vertex output (brw_varying_slot) into a byte offset within the
  * VUE.
  */
-static inline GLuint brw_vert_result_to_offset(struct brw_vue_map *vue_map,
-                                               GLuint vert_result)
+static inline GLuint brw_varying_to_offset(struct brw_vue_map *vue_map,
+                                           GLuint varying)
 {
-   return brw_vue_slot_to_offset(vue_map->vert_result_to_slot[vert_result]);
+   return brw_vue_slot_to_offset(vue_map->varying_to_slot[varying]);
 }
 
 
@@ -437,7 +447,6 @@ struct brw_vs_prog_data {
    GLuint curb_read_length;
    GLuint urb_read_length;
    GLuint total_grf;
-   GLbitfield64 outputs_written;
    GLuint nr_params;       /**< number of float params/constants */
    GLuint nr_pull_params; /**< number of dwords referenced by pull_param[] */
    GLuint total_scratch;
@@ -911,6 +920,15 @@ struct brw_context
       uint32_t offset;
    } sampler;
 
+   /**
+    * Layout of vertex data exiting the geometry portion of the pipleine.
+    * This comes from the geometry shader if one exists, otherwise from the
+    * vertex shader.
+    *
+    * BRW_NEW_VUE_MAP_GEOM_OUT is flagged when the VUE map changes.
+    */
+   struct brw_vue_map vue_map_geom_out;
+
    struct {
       struct brw_vs_prog_data *prog_data;
 
@@ -1138,7 +1156,8 @@ void brw_get_depthstencil_tile_masks(struct intel_mipmap_tree *depth_mt,
                                      struct intel_mipmap_tree *stencil_mt,
                                      uint32_t *out_tile_mask_x,
                                      uint32_t *out_tile_mask_y);
-void brw_workaround_depthstencil_alignment(struct brw_context *brw);
+void brw_workaround_depthstencil_alignment(struct brw_context *brw,
+                                           GLbitfield clear_mask);
 
 /*======================================================================
  * brw_queryobj.c

@@ -53,7 +53,7 @@
  * 256-bit increments.
  */
 uint32_t
-get_attr_override(struct brw_vue_map *vue_map, int urb_entry_read_offset,
+get_attr_override(const struct brw_vue_map *vue_map, int urb_entry_read_offset,
                   int fs_attr, bool two_side_color, uint32_t *max_source_attr)
 {
    if (fs_attr == VARYING_SLOT_POS) {
@@ -65,15 +65,15 @@ get_attr_override(struct brw_vue_map *vue_map, int urb_entry_read_offset,
    }
 
    /* Find the VUE slot for this attribute. */
-   int slot = vue_map->vert_result_to_slot[fs_attr];
+   int slot = vue_map->varying_to_slot[fs_attr];
 
    /* If there was only a back color written but not front, use back
     * as the color instead of undefined
     */
    if (slot == -1 && fs_attr == VARYING_SLOT_COL0)
-      slot = vue_map->vert_result_to_slot[VARYING_SLOT_BFC0];
+      slot = vue_map->varying_to_slot[VARYING_SLOT_BFC0];
    if (slot == -1 && fs_attr == VARYING_SLOT_COL1)
-      slot = vue_map->vert_result_to_slot[VARYING_SLOT_BFC1];
+      slot = vue_map->varying_to_slot[VARYING_SLOT_BFC1];
 
    if (slot == -1) {
       /* This attribute does not exist in the VUE--that means that the vertex
@@ -106,10 +106,10 @@ get_attr_override(struct brw_vue_map *vue_map, int urb_entry_read_offset,
     * do back-facing swizzling.
     */
    bool swizzling = two_side_color &&
-      ((vue_map->slot_to_vert_result[slot] == VARYING_SLOT_COL0 &&
-        vue_map->slot_to_vert_result[slot+1] == VARYING_SLOT_BFC0) ||
-       (vue_map->slot_to_vert_result[slot] == VARYING_SLOT_COL1 &&
-        vue_map->slot_to_vert_result[slot+1] == VARYING_SLOT_BFC1));
+      ((vue_map->slot_to_varying[slot] == VARYING_SLOT_COL0 &&
+        vue_map->slot_to_varying[slot+1] == VARYING_SLOT_BFC0) ||
+       (vue_map->slot_to_varying[slot] == VARYING_SLOT_COL1 &&
+        vue_map->slot_to_varying[slot+1] == VARYING_SLOT_BFC1));
 
    /* Update max_source_attr.  If swizzling, the SF will read this slot + 1. */
    if (*max_source_attr < source_attr + swizzling)
@@ -312,9 +312,9 @@ upload_sf_state(struct brw_context *brw)
        */
       assert(input_index < 16 || attr == input_index);
 
-      /* CACHE_NEW_VS_PROG | _NEW_LIGHT | _NEW_PROGRAM */
+      /* BRW_NEW_VUE_MAP_GEOM_OUT | _NEW_LIGHT | _NEW_PROGRAM */
       attr_overrides[input_index++] =
-         get_attr_override(&brw->vs.prog_data->vue_map,
+         get_attr_override(&brw->vue_map_geom_out,
 			   urb_entry_read_offset, attr,
                            ctx->VertexProgram._TwoSideEnabled,
                            &max_source_attr);
@@ -370,8 +370,8 @@ const struct brw_tracked_state gen6_sf_state = {
 		_NEW_POINT |
                 _NEW_MULTISAMPLE),
       .brw   = (BRW_NEW_CONTEXT |
-		BRW_NEW_FRAGMENT_PROGRAM),
-      .cache = CACHE_NEW_VS_PROG
+		BRW_NEW_FRAGMENT_PROGRAM |
+                BRW_NEW_VUE_MAP_GEOM_OUT)
    },
    .emit = upload_sf_state,
 };

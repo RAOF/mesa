@@ -36,6 +36,7 @@
 #include "util/u_format.h"
 #include "util/u_format_s3tc.h"
 #include "util/u_string.h"
+#include "util/u_debug.h"
 
 #include "os/os_time.h"
 
@@ -51,6 +52,14 @@
 
 /* XXX this should go away */
 #include "state_tracker/drm_driver.h"
+
+static const struct debug_named_value debug_options[] = {
+		{"msgs",      FD_DBG_MSGS,   "Print debug messages"},
+		{"disasm",    FD_DBG_DISASM, "Dump TGSI and adreno shader disassembly"},
+		DEBUG_NAMED_VALUE_END
+};
+
+DEBUG_GET_ONCE_FLAGS_OPTION(fd_mesa_debug, "FD_MESA_DEBUG", debug_options, 0)
 
 int fd_mesa_debug = 0;
 
@@ -165,6 +174,10 @@ fd_screen_get_param(struct pipe_screen *pscreen, enum pipe_cap param)
 	case PIPE_CAP_TEXTURE_MULTISAMPLE:
 	case PIPE_CAP_USER_CONSTANT_BUFFERS:
 		return 1;
+
+	case PIPE_CAP_TGSI_TEXCOORD:
+	case PIPE_CAP_PREFER_BLIT_BASED_TEXTURE_TRANSFER:
+		return 0;
 
 	case PIPE_CAP_CONSTANT_BUFFER_OFFSET_ALIGNMENT:
 		return 256;
@@ -425,9 +438,7 @@ fd_screen_create(struct fd_device *dev)
 	struct pipe_screen *pscreen;
 	uint64_t val;
 
-	char *fd_dbg = getenv("FD_MESA_DEBUG");
-	if (fd_dbg)
-		fd_mesa_debug = atoi(fd_dbg);
+	fd_mesa_debug = debug_get_option_fd_mesa_debug();
 
 	if (!screen)
 		return NULL;

@@ -65,7 +65,7 @@ static void compile_sf_prog( struct brw_context *brw,
    brw_init_compile(brw, &c.func, mem_ctx);
 
    c.key = *key;
-   c.vue_map = brw->vs.prog_data->vue_map;
+   c.vue_map = brw->vue_map_geom_out;
    if (c.key.do_point_coord) {
       /*
        * gl_PointCoord is a FS instead of VS builtin variable, thus it's
@@ -73,8 +73,8 @@ static void compile_sf_prog( struct brw_context *brw,
        * it manually to let SF shader generate the needed interpolation
        * coefficient for FS shader.
        */
-      c.vue_map.vert_result_to_slot[BRW_VARYING_SLOT_PNTC] = c.vue_map.num_slots;
-      c.vue_map.slot_to_vert_result[c.vue_map.num_slots++] = BRW_VARYING_SLOT_PNTC;
+      c.vue_map.varying_to_slot[BRW_VARYING_SLOT_PNTC] = c.vue_map.num_slots;
+      c.vue_map.slot_to_varying[c.vue_map.num_slots++] = BRW_VARYING_SLOT_PNTC;
    }
    c.urb_entry_read_offset = brw_sf_compute_urb_entry_read_offset(intel);
    c.nr_attr_regs = (c.vue_map.num_slots + 1)/2 - c.urb_entry_read_offset;
@@ -144,8 +144,8 @@ brw_upload_sf_prog(struct brw_context *brw)
 
    /* Populate the key, noting state dependencies:
     */
-   /* CACHE_NEW_VS_PROG */
-   key.attrs = brw->vs.prog_data->outputs_written; 
+   /* BRW_NEW_VUE_MAP_GEOM_OUT */
+   key.attrs = brw->vue_map_geom_out.slots_valid;
 
    /* BRW_NEW_REDUCED_PRIMITIVE */
    switch (brw->intel.reduced_primitive) {
@@ -216,8 +216,7 @@ const struct brw_tracked_state brw_sf_prog = {
    .dirty = {
       .mesa  = (_NEW_HINT | _NEW_LIGHT | _NEW_POLYGON | _NEW_POINT |
                 _NEW_TRANSFORM | _NEW_BUFFERS | _NEW_PROGRAM),
-      .brw   = (BRW_NEW_REDUCED_PRIMITIVE),
-      .cache = CACHE_NEW_VS_PROG
+      .brw   = (BRW_NEW_REDUCED_PRIMITIVE | BRW_NEW_VUE_MAP_GEOM_OUT)
    },
    .emit = brw_upload_sf_prog
 };

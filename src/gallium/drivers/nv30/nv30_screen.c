@@ -79,6 +79,7 @@ nv30_screen_get_param(struct pipe_screen *pscreen, enum pipe_cap param)
    case PIPE_CAP_TGSI_FS_COORD_ORIGIN_LOWER_LEFT:
    case PIPE_CAP_TGSI_FS_COORD_PIXEL_CENTER_HALF_INTEGER:
    case PIPE_CAP_TGSI_FS_COORD_PIXEL_CENTER_INTEGER:
+   case PIPE_CAP_TGSI_TEXCOORD:
    case PIPE_CAP_USER_CONSTANT_BUFFERS:
    case PIPE_CAP_USER_INDEX_BUFFERS:
       return 1;
@@ -125,6 +126,7 @@ nv30_screen_get_param(struct pipe_screen *pscreen, enum pipe_cap param)
    case PIPE_CAP_VERTEX_BUFFER_OFFSET_4BYTE_ALIGNED_ONLY:
    case PIPE_CAP_VERTEX_BUFFER_STRIDE_4BYTE_ALIGNED_ONLY:
    case PIPE_CAP_VERTEX_ELEMENT_SRC_OFFSET_4BYTE_ALIGNED_ONLY:
+   case PIPE_CAP_PREFER_BLIT_BASED_TEXTURE_TRANSFER:
       return 1;
    default:
       debug_printf("unknown param %d\n", param);

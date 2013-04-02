@@ -59,10 +59,12 @@
  ***************************************/
 
 static size_t
-brw_query_samples_for_format(struct gl_context *ctx, GLenum internalFormat,
-                             int samples[16])
+brw_query_samples_for_format(struct gl_context *ctx, GLenum target,
+                             GLenum internalFormat, int samples[16])
 {
    struct intel_context *intel = intel_context(ctx);
+
+   (void) target;
 
    switch (intel->gen) {
    case 7:
@@ -138,7 +140,6 @@ brwCreateContext(int api,
                           mesaVis, driContextPriv,
 			  sharedContextPrivate, &functions,
 			  error)) {
-      printf("%s: failed to init intel context\n", __FUNCTION__);
       ralloc_free(brw);
       return false;
    }
@@ -201,13 +202,13 @@ brwCreateContext(int api,
    if (intel->gen == 6) {
       ctx->Const.MaxSamples = 4;
       ctx->Const.MaxColorTextureSamples = 4;
-      ctx->Const.MaxDepthTextureSamples = 1;
+      ctx->Const.MaxDepthTextureSamples = 4;
       ctx->Const.MaxIntegerSamples = 4;
    }
    else if (intel->gen >= 7) {
       ctx->Const.MaxSamples = 8;
       ctx->Const.MaxColorTextureSamples = 8;
-      ctx->Const.MaxDepthTextureSamples = 1;
+      ctx->Const.MaxDepthTextureSamples = 8;
       ctx->Const.MaxIntegerSamples = 8;
    }
 

@@ -289,8 +289,8 @@ brw_wm_debug_recompile(struct brw_context *brw,
                       old_key->proj_attrib_mask, key->proj_attrib_mask);
    found |= key_debug(intel, "renderbuffer height",
                       old_key->drawable_height, key->drawable_height);
-   found |= key_debug(intel, "vertex shader outputs",
-                      old_key->vp_outputs_written, key->vp_outputs_written);
+   found |= key_debug(intel, "input slots valid",
+                      old_key->input_slots_valid, key->input_slots_valid);
 
    found |= brw_debug_recompile_sampler_key(intel, &old_key->tex, &key->tex);
 
@@ -429,8 +429,12 @@ static void brw_wm_populate_key( struct brw_context *brw,
     */
    if (ctx->Shader.CurrentFragmentProgram)
       key->proj_attrib_mask = ~(GLbitfield64) 0;
-   else
-      key->proj_attrib_mask = brw->wm.input_size_masks[4-1];
+   else {
+      /* Bit VARYING_BIT_POS of key.proj_attrib_mask is never used, so to
+       * avoid unnecessary recompiles, always set it to 1.
+       */
+      key->proj_attrib_mask = brw->wm.input_size_masks[4-1] | VARYING_BIT_POS;
+   }
 
    /* _NEW_LIGHT */
    key->flat_shade = (ctx->Light.ShadeModel == GL_FLAT);
@@ -475,9 +479,9 @@ static void brw_wm_populate_key( struct brw_context *brw,
   /* _NEW_MULTISAMPLE */
    key->sample_alpha_to_coverage = ctx->Multisample.SampleAlphaToCoverage;
 
-   /* CACHE_NEW_VS_PROG */
+   /* BRW_NEW_VUE_MAP_GEOM_OUT */
    if (intel->gen < 6)
-      key->vp_outputs_written = brw->vs.prog_data->outputs_written;
+      key->input_slots_valid = brw->vue_map_geom_out.slots_valid;
 
    /* The unique fragment program ID */
    key->program_string_id = fp->id;
@@ -520,8 +524,8 @@ const struct brw_tracked_state brw_wm_prog = {
 		_NEW_MULTISAMPLE),
       .brw   = (BRW_NEW_FRAGMENT_PROGRAM |
 		BRW_NEW_WM_INPUT_DIMENSIONS |
-		BRW_NEW_REDUCED_PRIMITIVE),
-      .cache = CACHE_NEW_VS_PROG,
+		BRW_NEW_REDUCED_PRIMITIVE |
+                BRW_NEW_VUE_MAP_GEOM_OUT)
    },
    .emit = brw_upload_wm_prog
 };

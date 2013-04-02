@@ -208,6 +208,7 @@ llvmpipe_get_param(struct pipe_screen *screen, enum pipe_cap param)
    case PIPE_CAP_VERTEX_BUFFER_OFFSET_4BYTE_ALIGNED_ONLY:
    case PIPE_CAP_VERTEX_BUFFER_STRIDE_4BYTE_ALIGNED_ONLY:
    case PIPE_CAP_VERTEX_ELEMENT_SRC_OFFSET_4BYTE_ALIGNED_ONLY:
+   case PIPE_CAP_TGSI_TEXCOORD:
       return 0;
 
    case PIPE_CAP_CONSTANT_BUFFER_OFFSET_ALIGNMENT:
@@ -221,6 +222,8 @@ llvmpipe_get_param(struct pipe_screen *screen, enum pipe_cap param)
       return 1;
    case PIPE_CAP_TEXTURE_BUFFER_OFFSET_ALIGNMENT:
       return 1;
+   case PIPE_CAP_PREFER_BLIT_BASED_TEXTURE_TRANSFER:
+      return 0;
    }
    /* should only get here on unhandled cases */
    debug_printf("Unexpected PIPE_CAP %d query\n", param);
@@ -321,7 +324,8 @@ llvmpipe_is_format_supported( struct pipe_screen *_screen,
       if (format_desc->colorspace != UTIL_FORMAT_COLORSPACE_RGB)
          return FALSE;
 
-      if (format_desc->layout != UTIL_FORMAT_LAYOUT_PLAIN)
+      if (format_desc->layout != UTIL_FORMAT_LAYOUT_PLAIN &&
+          format != PIPE_FORMAT_R11G11B10_FLOAT)
          return FALSE;
       assert(format_desc->block.width == 1);
       assert(format_desc->block.height == 1);
@@ -329,7 +333,8 @@ llvmpipe_is_format_supported( struct pipe_screen *_screen,
       if (format_desc->is_mixed)
          return FALSE;
 
-      if (!format_desc->is_array && !format_desc->is_bitmask)
+      if (!format_desc->is_array && !format_desc->is_bitmask &&
+          format != PIPE_FORMAT_R11G11B10_FLOAT)
          return FALSE;
 
       /*

@@ -54,7 +54,7 @@ fd_clear(struct pipe_context *pctx, unsigned buffers,
 {
 	struct fd_context *ctx = fd_context(pctx);
 	struct fd_ringbuffer *ring = ctx->ring;
-	struct pipe_framebuffer_state *fb = &ctx->framebuffer.base;
+	struct pipe_framebuffer_state *fb = &ctx->framebuffer;
 	uint32_t reg, colr = 0;
 
 	ctx->cleared |= buffers;
@@ -105,16 +105,27 @@ fd_clear(struct pipe_context *pctx, unsigned buffers,
 	OUT_PKT3(ring, CP_SET_CONSTANT, 2);
 	OUT_RING(ring, CP_REG(REG_RB_COPY_CONTROL));
 	reg = 0;
-	if (buffers & PIPE_CLEAR_DEPTH) {
-		reg |= RB_COPY_CONTROL_CLEAR_MASK(0xf) |
-				RB_COPY_CONTROL_DEPTH_CLEAR_ENABLE;
+	if (buffers & (PIPE_CLEAR_DEPTH | PIPE_CLEAR_STENCIL)) {
+		reg |= RB_COPY_CONTROL_DEPTH_CLEAR_ENABLE;
+		switch (fd_pipe2depth(fb->zsbuf->format)) {
+		case DEPTHX_24_8:
+			if (buffers & PIPE_CLEAR_DEPTH)
+				reg |= RB_COPY_CONTROL_CLEAR_MASK(0xe);
+			if (buffers & PIPE_CLEAR_STENCIL)
+				reg |= RB_COPY_CONTROL_CLEAR_MASK(0x1);
+			break;
+		case DEPTHX_16:
+			if (buffers & PIPE_CLEAR_DEPTH)
+				reg |= RB_COPY_CONTROL_CLEAR_MASK(0xf);
+			break;
+		}
 	}
 	OUT_RING(ring, reg);
 
 	OUT_PKT3(ring, CP_SET_CONSTANT, 2);
 	OUT_RING(ring, CP_REG(REG_RB_DEPTH_CLEAR));
 	reg = 0;
-	if (fb->zsbuf) {
+	if (buffers & (PIPE_CLEAR_DEPTH | PIPE_CLEAR_STENCIL)) {
 		switch (fd_pipe2depth(fb->zsbuf->format)) {
 		case DEPTHX_24_8:
 			reg = (((uint32_t)(0xffffff * depth)) << 8) |
@@ -159,11 +170,6 @@ fd_clear(struct pipe_context *pctx, unsigned buffers,
 	OUT_RING(ring, xy2d(0,0));	        /* PA_SC_WINDOW_SCISSOR_TL */
 	OUT_RING(ring, xy2d(fb->width,      /* PA_SC_WINDOW_SCISSOR_BR */
 			fb->height));
-
-	OUT_PKT3(ring, CP_SET_CONSTANT, 2);
-	OUT_RING(ring, CP_REG(REG_RB_COLOR_INFO));
-	OUT_RING(ring, RB_COLOR_INFO_COLOR_SWAP(1) |
-			RB_COLOR_INFO_COLOR_FORMAT(fd_pipe2color(fb->cbufs[0]->format)));
 
 	OUT_PKT3(ring, CP_SET_CONSTANT, 2);
 	OUT_RING(ring, CP_REG(REG_RB_COLOR_MASK));

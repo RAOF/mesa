@@ -329,7 +329,10 @@ static int r600_get_param(struct pipe_screen* pscreen, enum pipe_cap param)
 	case PIPE_CAP_USER_CONSTANT_BUFFERS:
 	case PIPE_CAP_START_INSTANCE:
 	case PIPE_CAP_NPOT_TEXTURES:
+        case PIPE_CAP_PREFER_BLIT_BASED_TEXTURE_TRANSFER:
 		return 1;
+	case PIPE_CAP_TGSI_TEXCOORD:
+		return 0;
 
         case PIPE_CAP_MIN_MAP_BUFFER_ALIGNMENT:
                 return 64;
@@ -469,7 +472,7 @@ static int r600_get_shader_param(struct pipe_screen* pscreen, unsigned shader, e
 	case PIPE_SHADER_CAP_INDIRECT_OUTPUT_ADDR:
 	case PIPE_SHADER_CAP_INDIRECT_TEMP_ADDR:
 	case PIPE_SHADER_CAP_INDIRECT_CONST_ADDR:
-		return 0;
+		return 1;
 	case PIPE_SHADER_CAP_INTEGERS:
 		return 1;
 	case PIPE_SHADER_CAP_SUBROUTINES:

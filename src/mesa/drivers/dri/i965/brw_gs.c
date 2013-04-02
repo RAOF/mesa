@@ -167,7 +167,7 @@ static void populate_key( struct brw_context *brw,
    memset(key, 0, sizeof(*key));
 
    /* CACHE_NEW_VS_PROG (part of VUE map) */
-   key->attrs = brw->vs.prog_data->outputs_written;
+   key->attrs = brw->vs.prog_data->vue_map.slots_valid;
 
    /* BRW_NEW_PRIMITIVE */
    key->primitive = brw->primitive;
@@ -197,7 +197,7 @@ static void populate_key( struct brw_context *brw,
          /* Make sure that the VUE slots won't overflow the unsigned chars in
           * key->transform_feedback_bindings[].
           */
-         STATIC_ASSERT(BRW_VARYING_SLOT_MAX <= 256);
+         STATIC_ASSERT(BRW_VARYING_SLOT_COUNT <= 256);
 
          /* Make sure that we don't need more binding table entries than we've
           * set aside for use in transform feedback.  (We shouldn't, since we

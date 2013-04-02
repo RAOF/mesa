@@ -299,8 +299,8 @@ public:
    /* Regs for vertex results.  Generated at ir_variable visiting time
     * for the ir->location's used.
     */
-   dst_reg output_reg[BRW_VARYING_SLOT_MAX];
-   const char *output_reg_annotation[BRW_VARYING_SLOT_MAX];
+   dst_reg output_reg[BRW_VARYING_SLOT_COUNT];
+   const char *output_reg_annotation[BRW_VARYING_SLOT_COUNT];
    int uniform_size[MAX_UNIFORMS];
    int uniform_vector_size[MAX_UNIFORMS];
    int uniforms;
@@ -441,8 +441,8 @@ public:
    void emit_ndc_computation();
    void emit_psiz_and_flags(struct brw_reg reg);
    void emit_clip_distances(struct brw_reg reg, int offset);
-   void emit_generic_urb_slot(dst_reg reg, int vert_result);
-   void emit_urb_slot(int mrf, int vert_result);
+   void emit_generic_urb_slot(dst_reg reg, int varying);
+   void emit_urb_slot(int mrf, int varying);
    void emit_urb_writes(void);
 
    void emit_shader_time_begin();

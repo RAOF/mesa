@@ -564,7 +564,10 @@ static int r600_get_param(struct pipe_screen* pscreen, enum pipe_cap param)
 	case PIPE_CAP_START_INSTANCE:
 	case PIPE_CAP_MAX_DUAL_SOURCE_RENDER_TARGETS:
 	case PIPE_CAP_TEXTURE_BUFFER_OBJECTS:
+        case PIPE_CAP_PREFER_BLIT_BASED_TEXTURE_TRANSFER:
 		return 1;
+	case PIPE_CAP_TGSI_TEXCOORD:
+		return 0;
 
         case PIPE_CAP_MIN_MAP_BUFFER_ALIGNMENT:
                 return R600_MAP_BUFFER_ALIGNMENT;
@@ -1086,6 +1089,16 @@ struct pipe_screen *r600_screen_create(struct radeon_winsys *ws)
 	ws->query_info(ws, &rscreen->info);
 
 	rscreen->debug_flags = debug_get_flags_option("R600_DEBUG", debug_options, 0);
+	if (debug_get_bool_option("R600_DEBUG_COMPUTE", FALSE))
+		rscreen->debug_flags |= DBG_COMPUTE;
+	if (debug_get_bool_option("R600_DUMP_SHADERS", FALSE))
+		rscreen->debug_flags |= DBG_FS | DBG_VS | DBG_GS | DBG_PS | DBG_CS;
+	if (!debug_get_bool_option("R600_HYPERZ", TRUE))
+		rscreen->debug_flags |= DBG_NO_HYPERZ;
+	if (!debug_get_bool_option("R600_LLVM", TRUE))
+		rscreen->debug_flags |= DBG_NO_LLVM;
+	if (debug_get_bool_option("R600_PRINT_TEXDEPTH", FALSE))
+		rscreen->debug_flags |= DBG_TEX_DEPTH;
 	rscreen->family = rscreen->info.family;
 	rscreen->chip_class = rscreen->info.chip_class;
 

@@ -773,7 +773,8 @@ brw_get_texture_swizzle(const struct gl_context *ctx,
    case GL_RED:
    case GL_RG:
    case GL_RGB:
-      swizzles[3] = SWIZZLE_ONE;
+      if (_mesa_get_format_bits(img->TexFormat, GL_ALPHA_BITS) > 0)
+         swizzles[3] = SWIZZLE_ONE;
       break;
    }
 
@@ -1224,7 +1225,7 @@ brw_update_renderbuffer_surface(struct brw_context *brw,
 	  * select the image.  So, instead, we just make a new single-level
 	  * miptree and render into that.
 	  */
-	 intel_renderbuffer_move_to_temp(intel, irb);
+	 intel_renderbuffer_move_to_temp(intel, irb, false);
 	 mt = irb->mt;
       }
    }

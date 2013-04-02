@@ -60,7 +60,7 @@
 #include <sys/stat.h>
 #endif
 #ifdef HAVE_MIR_PLATFORM
-#include <mir_client_library.h>
+#include <mir_toolkit/mir_client_library.h>
 #endif
 
 /**
@@ -158,7 +158,7 @@ _eglNativePlatformDetectNativeDisplay(EGLNativeDisplayType nativeDisplay)
 #endif
 
 #ifdef HAVE_MIR_PLATFORM
-   if (mir_connection_is_valid(nativeDisplay))
+   if (mir_egl_native_display_is_valid(nativeDisplay))
       return _EGL_PLATFORM_MIR;
 #endif
 
