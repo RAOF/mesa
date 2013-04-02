@@ -1,3 +1,10 @@
+mesa (9.2~git20130402.b2eee086-0ubuntu0+mir1) raring; urgency=low
+
+  * Rebase on mesa master, to pick up DRI Image 7 support, required for...
+  * egl-platform-mir.patch: Switch to dma-buf support
+
+ -- Christopher James Halse Rogers <raof@ubuntu.com>  Tue, 02 Apr 2013 18:58:11 +1100
+
 mesa (9.1~rc2-0ubuntu0+mir3) raring; urgency=low
 
   * Update to new MirEGLNativeDisplay interface
