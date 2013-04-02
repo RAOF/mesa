@@ -148,6 +148,7 @@ mir_populate_colour_buffers(struct dri2_egl_surface *surf)
 
    surf->dri_buffers[__DRI_BUFFER_BACK_LEFT]->name = 0;
    surf->dri_buffers[__DRI_BUFFER_BACK_LEFT]->fd = buffer_package.fd[0];
+   surf->dri_buffers[__DRI_BUFFER_BACK_LEFT]->pitch = buffer_package.stride;
 }
 
 /**
