@@ -21,6 +21,24 @@ index 81d4a3f..fd93ae9 100644
  
  AM_CONDITIONAL(HAVE_EGL_DRIVER_DRI2, test "x$HAVE_EGL_DRIVER_DRI2" != "x")
  AM_CONDITIONAL(HAVE_EGL_DRIVER_GLX, test "x$HAVE_EGL_DRIVER_GLX" != "x")
+diff --git a/include/GL/internal/dri_interface.h b/include/GL/internal/dri_interface.h
+index 30ce175..4855742 100644
+--- a/include/GL/internal/dri_interface.h
++++ b/include/GL/internal/dri_interface.h
+@@ -766,10 +766,12 @@ struct __DRIbufferRec {
+     unsigned int pitch;
+     unsigned int cpp;
+     unsigned int flags;
++    unsigned int fd;    /**< Only available with DRI2_LOADER_VERSION >= 4, */
++                        /**< Only valid if name == 0 */
+ };
+ 
+ #define __DRI_DRI2_LOADER "DRI_DRI2Loader"
+-#define __DRI_DRI2_LOADER_VERSION 3
++#define __DRI_DRI2_LOADER_VERSION 4
+ struct __DRIdri2LoaderExtensionRec {
+     __DRIextension base;
+ 
 diff --git a/src/egl/drivers/dri2/Makefile.am b/src/egl/drivers/dri2/Makefile.am
 index 45f7dfa..dfb0c05 100644
 --- a/src/egl/drivers/dri2/Makefile.am
@@ -115,10 +133,10 @@ index 6dfdf94..fbb2696 100644
  char *
 diff --git a/src/egl/drivers/dri2/platform_mir.c b/src/egl/drivers/dri2/platform_mir.c
 new file mode 100644
-index 0000000..2a8dd4d
+index 0000000..c62fc49
 --- /dev/null
 +++ b/src/egl/drivers/dri2/platform_mir.c
-@@ -0,0 +1,378 @@
+@@ -0,0 +1,364 @@
 +/*
 + * Copyright © 2012 Canonical, Inc
 + *
@@ -255,33 +273,20 @@ index 0000000..2a8dd4d
 +}
 +
 +static void
-+mir_copy_back_to_front(struct dri2_egl_surface *surf)
-+{
-+   memcpy(surf->dri_buffers[__DRI_BUFFER_FRONT_LEFT],
-+          surf->dri_buffers[__DRI_BUFFER_BACK_LEFT],
-+          sizeof(*surf->dri_buffers[__DRI_BUFFER_BACK_LEFT]));
-+
-+   surf->dri_buffers[__DRI_BUFFER_FRONT_LEFT]->attachment =
-+      __DRI_BUFFER_FRONT_LEFT;
-+}
-+
-+static void
 +mir_populate_colour_buffers(struct dri2_egl_surface *surf)
 +{
 +   MirBufferPackage buffer_package;
-+
++   
 +   surf->mir_disp->surface_get_current_buffer(surf->mir_disp,
 +                                              (EGLNativeWindowType)surf->mir_surf,
 +                                              &buffer_package);
-+   /* We expect [name, pitch] in our buffer */
-+   assert(buffer_package.data_items == 1);
 +
-+   /* Frontbuffer hack; Mir doesn't give us access to the front buffer */
-+   mir_copy_back_to_front(surf);
++   /* We expect no data items, and (for the moment) one PRIME fd */
++   assert(buffer_package.data_items == 0);
++   assert(buffer_package.fd_items == 1);
 +
-+   surf->dri_buffers[__DRI_BUFFER_BACK_LEFT]->name = buffer_package.data[0];
-+   /* Man, I hope that Intel's just being funky when they multiply pitch by
-+      cpp */
++   surf->dri_buffers[__DRI_BUFFER_BACK_LEFT]->name = 0;
++   surf->dri_buffers[__DRI_BUFFER_BACK_LEFT]->fd = buffer_package.fd[0];
 +   surf->dri_buffers[__DRI_BUFFER_BACK_LEFT]->pitch = buffer_package.stride;
 +}
 +
@@ -314,6 +319,7 @@ index 0000000..2a8dd4d
 +   dri2_surf->mir_surf = (MirSurface *)window;
 +   dri2_surf->mir_disp->surface_get_parameters(dri2_surf->mir_disp, (EGLNativeWindowType)dri2_surf->mir_surf,
 +                                               &surf_params);
++
 +   dri2_surf->base.Width = surf_params.width;
 +   dri2_surf->base.Height = surf_params.height;
 +
@@ -328,8 +334,6 @@ index 0000000..2a8dd4d
 +   dri2_surf->dri_buffers[__DRI_BUFFER_BACK_LEFT]->cpp = 4;
 +
 +   mir_populate_colour_buffers(dri2_surf);
-+   /* Hack: this is not actually the front buffer, but we can't get it */
-+   mir_copy_back_to_front(dri2_surf);
 +
 +   dri2_surf->dri_drawable = 
 +      (*dri2_dpy->dri2->createNewDrawable) (dri2_dpy->dri_screen,
@@ -384,11 +388,11 @@ index 0000000..2a8dd4d
 +   struct dri2_egl_surface *dri2_surf = dri2_egl_surface(draw);
 +   struct dri2_egl_driver *dri2_drv = dri2_egl_driver(drv);
 +
-+   dri2_surf->mir_disp->surface_advance_buffer(dri2_surf->mir_disp, (EGLNativeWindowType)dri2_surf->mir_surf);
++   (*dri2_dpy->flush->flush)(dri2_surf->dri_drawable);
 +
++   dri2_surf->mir_disp->surface_advance_buffer(dri2_surf->mir_disp, (EGLNativeWindowType)dri2_surf->mir_surf);
 +   mir_populate_colour_buffers(dri2_surf);
 +
-+   (*dri2_dpy->flush->flush)(dri2_surf->dri_drawable);
 +   (*dri2_dpy->flush->invalidate)(dri2_surf->dri_drawable);
 +
 +   return EGL_TRUE;
@@ -461,7 +465,7 @@ index 0000000..2a8dd4d
 +      goto cleanup_conn;
 +
 +   dri2_dpy->dri2_loader_extension.base.name = __DRI_DRI2_LOADER;
-+   dri2_dpy->dri2_loader_extension.base.version = 3;
++   dri2_dpy->dri2_loader_extension.base.version = 4;
 +   dri2_dpy->dri2_loader_extension.getBuffers = dri2_get_buffers;
 +   dri2_dpy->dri2_loader_extension.flushFrontBuffer = dri2_flush_front_buffer;
 +   dri2_dpy->dri2_loader_extension.getBuffersWithFormat =
@@ -723,3 +727,66 @@ index a3a0530..7542e93 100644
  
     if (usage & GBM_BO_USE_SCANOUT)
        dri_use |= __DRI_IMAGE_USE_SCANOUT;
+diff --git a/src/mesa/drivers/dri/intel/intel_context.c b/src/mesa/drivers/dri/intel/intel_context.c
+index bf4045e..f0a4198 100644
+--- a/src/mesa/drivers/dri/intel/intel_context.c
++++ b/src/mesa/drivers/dri/intel/intel_context.c
+@@ -1105,34 +1105,47 @@ intel_process_dri2_buffer(struct intel_context *intel,
+     * use of a mapping of the buffer involves a bunch of page faulting which is
+     * moderately expensive.
+     */
++   /* TODO: Is caching based on fd possible or useful? */
+    if (num_samples == 0) {
+        if (rb->mt &&
+            rb->mt->region &&
+-           rb->mt->region->name == buffer->name)
++           rb->mt->region->name == buffer->name &&
++           rb->mt->region->name != 0)
+           return;
+    } else {
+        if (rb->mt &&
+            rb->mt->singlesample_mt &&
+            rb->mt->singlesample_mt->region &&
+-           rb->mt->singlesample_mt->region->name == buffer->name)
++           rb->mt->singlesample_mt->region->name == buffer->name &&
++           rb->mt->singlesample_mt->region->name != 0)
+           return;
+    }
+ 
+    if (unlikely(INTEL_DEBUG & DEBUG_DRI)) {
+       fprintf(stderr,
+-	      "attaching buffer %d, at %d, cpp %d, pitch %d\n",
++	      "attaching buffer %d, at %d, cpp %d, pitch %d, fd %d\n",
+ 	      buffer->name, buffer->attachment,
+-	      buffer->cpp, buffer->pitch);
++	      buffer->cpp, buffer->pitch, buffer->fd);
+    }
+ 
+    intel_miptree_release(&rb->mt);
+-   region = intel_region_alloc_for_handle(intel->intelScreen,
+-                                          buffer->cpp,
+-                                          drawable->w,
+-                                          drawable->h,
+-                                          buffer->pitch,
+-                                          buffer->name,
+-                                          buffer_name);
++   if (buffer->name != 0) {
++      region = intel_region_alloc_for_handle(intel->intelScreen,
++                                             buffer->cpp,
++                                             drawable->w,
++                                             drawable->h,
++                                             buffer->pitch,
++                                             buffer->name,
++                                             buffer_name);
++   } else {
++      region = intel_region_alloc_for_fd(intel->intelScreen,
++                                         buffer->cpp,
++                                         drawable->w,
++                                         drawable->h,
++                                         buffer->pitch,
++                                         buffer->fd,
++                                         buffer_name);
++   }
+    if (!region)
+       return;
+ 
