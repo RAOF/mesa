@@ -113,8 +113,8 @@ struct radeon_bomgr {
     /* Winsys. */
     struct radeon_drm_winsys *rws;
 
-    /* List of buffer handles and its mutex. */
-    struct util_hash_table *bo_handles;
+    /* List of buffer GEM names. Protected by bo_handles_mutex. */
+    struct util_hash_table *bo_names;
     pipe_mutex bo_handles_mutex;
     pipe_mutex bo_va_mutex;
 
@@ -371,7 +371,7 @@ static void radeon_bo_destroy(struct pb_buffer *_buf)
 
     if (bo->name) {
         pipe_mutex_lock(bo->mgr->bo_handles_mutex);
-        util_hash_table_remove(bo->mgr->bo_handles,
+        util_hash_table_remove(bo->mgr->bo_names,
                                (void*)(uintptr_t)bo->name);
         pipe_mutex_unlock(bo->mgr->bo_handles_mutex);
     }
@@ -653,7 +653,7 @@ static boolean radeon_bomgr_is_buffer_busy(struct pb_manager *_mgr,
 static void radeon_bomgr_destroy(struct pb_manager *_mgr)
 {
     struct radeon_bomgr *mgr = radeon_bomgr(_mgr);
-    util_hash_table_destroy(mgr->bo_handles);
+    util_hash_table_destroy(mgr->bo_names);
     pipe_mutex_destroy(mgr->bo_handles_mutex);
     pipe_mutex_destroy(mgr->bo_va_mutex);
     FREE(mgr);
@@ -685,7 +685,7 @@ struct pb_manager *radeon_bomgr_create(struct radeon_drm_winsys *rws)
     mgr->base.is_buffer_busy = radeon_bomgr_is_buffer_busy;
 
     mgr->rws = rws;
-    mgr->bo_handles = util_hash_table_create(handle_hash, handle_compare);
+    mgr->bo_names = util_hash_table_create(handle_hash, handle_compare);
     pipe_mutex_init(mgr->bo_handles_mutex);
     pipe_mutex_init(mgr->bo_va_mutex);
 
@@ -879,7 +879,7 @@ static struct pb_buffer *radeon_winsys_bo_from_handle(struct radeon_winsys *rws,
     pipe_mutex_lock(mgr->bo_handles_mutex);
 
     /* First check if there already is an existing bo for the handle. */
-    bo = util_hash_table_get(mgr->bo_handles, (void*)(uintptr_t)whandle->handle);
+    bo = util_hash_table_get(mgr->bo_names, (void*)(uintptr_t)whandle->handle);
     if (bo) {
         /* Increase the refcount. */
         struct pb_buffer *b = NULL;
@@ -913,7 +913,7 @@ static struct pb_buffer *radeon_winsys_bo_from_handle(struct radeon_winsys *rws,
     bo->va = 0;
     pipe_mutex_init(bo->map_mutex);
 
-    util_hash_table_set(mgr->bo_handles, (void*)(uintptr_t)whandle->handle, bo);
+    util_hash_table_set(mgr->bo_names, (void*)(uintptr_t)whandle->handle, bo);
 
 done:
     pipe_mutex_unlock(mgr->bo_handles_mutex);
@@ -979,7 +979,7 @@ static boolean radeon_winsys_bo_get_handle(struct pb_buffer *buffer,
             bo->flink = flink.name;
 
             pipe_mutex_lock(bo->mgr->bo_handles_mutex);
-            util_hash_table_set(bo->mgr->bo_handles, (void*)(uintptr_t)bo->flink, bo);
+            util_hash_table_set(bo->mgr->bo_names, (void*)(uintptr_t)bo->flink, bo);
             pipe_mutex_unlock(bo->mgr->bo_handles_mutex);
         }
         whandle->handle = bo->flink;
