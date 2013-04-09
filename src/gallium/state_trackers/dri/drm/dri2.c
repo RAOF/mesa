@@ -231,6 +231,7 @@ dri2_drawable_process_buffers(struct dri_drawable *drawable,
 
       templ.format = format;
       templ.bind = bind;
+      whandle.type = DRM_API_HANDLE_TYPE_SHARED;
       whandle.handle = buf->name;
       whandle.stride = buf->pitch;
 
@@ -501,6 +502,7 @@ dri2_create_image_from_name(__DRIscreen *_screen,
 
    memset(&whandle, 0, sizeof(whandle));
    whandle.handle = name;
+   whandle.type = DRM_API_HANDLE_TYPE_SHARED;
    whandle.stride = pitch * util_format_get_blocksize(pf);
 
    img->texture = screen->base.screen->resource_from_handle(screen->base.screen,
