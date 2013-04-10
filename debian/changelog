@@ -1,3 +1,9 @@
+mesa (9.2~git20130402.b2eee086-0ubuntu0+mir2) unstable; urgency=low
+
+  * egl-platform-mir.patch: Add radeon support for dma-buf
+
+ -- Christopher James Halse Rogers <raof@ubuntu.com>  Wed, 10 Apr 2013 16:43:47 +1000
+
 mesa (9.2~git20130402.b2eee086-0ubuntu0+mir1) raring; urgency=low
 
   * Rebase on mesa master, to pick up DRI Image 7 support, required for...
