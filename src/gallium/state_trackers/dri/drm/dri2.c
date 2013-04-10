@@ -231,8 +231,13 @@ dri2_drawable_process_buffers(struct dri_drawable *drawable,
 
       templ.format = format;
       templ.bind = bind;
-      whandle.type = DRM_API_HANDLE_TYPE_SHARED;
-      whandle.handle = buf->name;
+      if (buf->fd != 0) {
+         whandle.type = DRM_API_HANDLE_TYPE_FD;
+         whandle.handle = buf->fd;
+      } else {
+         whandle.type = DRM_API_HANDLE_TYPE_SHARED;
+         whandle.handle = buf->name;
+      }
       whandle.stride = buf->pitch;
 
       drawable->textures[statt] =
