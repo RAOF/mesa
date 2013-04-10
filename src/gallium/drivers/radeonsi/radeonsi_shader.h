@@ -29,12 +29,15 @@
 #ifndef RADEONSI_SHADER_H
 #define RADEONSI_SHADER_H
 
+#include <llvm-c/Core.h> /* LLVMModuleRef */
+
 #define SI_SGPR_CONST		0
 #define SI_SGPR_SAMPLER		2
 #define SI_SGPR_RESOURCE	4
 #define SI_SGPR_VERTEX_BUFFER	6
+#define SI_SGPR_START_INSTANCE	8
 
-#define SI_VS_NUM_USER_SGPR	8
+#define SI_VS_NUM_USER_SGPR	9
 #define SI_PS_NUM_USER_SGPR	6
 
 /* LLVM function parameter indices */
@@ -44,7 +47,11 @@
 
 /* VS only parameters */
 #define SI_PARAM_VERTEX_BUFFER	3
-#define SI_PARAM_VERTEX_INDEX	4
+#define SI_PARAM_START_INSTANCE	4
+#define SI_PARAM_VERTEX_ID	5
+#define SI_PARAM_DUMMY_0	6
+#define SI_PARAM_DUMMY_1	7
+#define SI_PARAM_INSTANCE_ID	8
 
 /* PS only parameters */
 #define SI_PARAM_PRIM_MASK		3
@@ -101,17 +108,23 @@ struct si_shader {
 
 	unsigned		ninterp;
 	bool			uses_kill;
+	bool			uses_instanceid;
 	bool			fs_write_all;
 	unsigned		nr_cbufs;
 };
 
-struct si_shader_key {
-	unsigned		export_16bpc:8;
-	unsigned		nr_cbufs:4;
-	unsigned		color_two_side:1;
-	unsigned		alpha_func:3;
-	unsigned		flatshade:1;
-	float			alpha_ref;
+union si_shader_key {
+	struct {
+		unsigned	export_16bpc:8;
+		unsigned	nr_cbufs:4;
+		unsigned	color_two_side:1;
+		unsigned	alpha_func:3;
+		unsigned	flatshade:1;
+		float		alpha_ref;
+	} ps;
+	struct {
+		unsigned	instance_divisors[PIPE_MAX_ATTRIBS];
+	} vs;
 };
 
 struct si_pipe_shader {
@@ -126,12 +139,14 @@ struct si_pipe_shader {
 	unsigned			spi_shader_col_format;
 	unsigned			sprite_coord_enable;
 	unsigned			so_strides[4];
-	struct si_shader_key		key;
+	union si_shader_key		key;
 };
 
 /* radeonsi_shader.c */
-int si_pipe_shader_create(struct pipe_context *ctx, struct si_pipe_shader *shader,
-			  struct si_shader_key key);
+int si_pipe_shader_create(struct pipe_context *ctx, struct si_pipe_shader *shader);
+int si_pipe_shader_create(struct pipe_context *ctx, struct si_pipe_shader *shader);
+int si_compile_llvm(struct r600_context *rctx, struct si_pipe_shader *shader,
+							LLVMModuleRef mod);
 void si_pipe_shader_destroy(struct pipe_context *ctx, struct si_pipe_shader *shader);
 
 #endif

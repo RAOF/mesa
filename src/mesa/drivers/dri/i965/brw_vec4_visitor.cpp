@@ -2127,6 +2127,7 @@ vec4_visitor::visit(ir_texture *ir)
       lod_type = ir->lod_info.grad.dPdx->type;
       break;
    case ir_txb:
+   case ir_lod:
       break;
    }
 
@@ -2150,6 +2151,10 @@ vec4_visitor::visit(ir_texture *ir)
       break;
    case ir_txb:
       assert(!"TXB is not valid for vertex shaders.");
+      break;
+   case ir_lod:
+      assert(!"LOD is not valid for vertex shaders.");
+      break;
    }
 
    bool use_texture_offset = ir->offset != NULL && ir->op != ir_txf;
@@ -2638,11 +2643,16 @@ vec4_visitor::emit_urb_writes()
       }
    }
 
+   bool eot = slot >= c->prog_data.vue_map.num_slots;
+   if (eot) {
+      if (INTEL_DEBUG & DEBUG_SHADER_TIME)
+         emit_shader_time_end();
+   }
    current_annotation = "URB write";
    vec4_instruction *inst = emit(VS_OPCODE_URB_WRITE);
    inst->base_mrf = base_mrf;
    inst->mlen = align_interleaved_urb_mlen(brw, mrf - base_mrf);
-   inst->eot = (slot >= c->prog_data.vue_map.num_slots);
+   inst->eot = eot;
 
    /* Optional second URB write */
    if (!inst->eot) {
@@ -2652,6 +2662,11 @@ vec4_visitor::emit_urb_writes()
 	 assert(mrf < max_usable_mrf);
 
          emit_urb_slot(mrf++, c->prog_data.vue_map.slot_to_varying[slot]);
+      }
+
+      if (eot) {
+         if (INTEL_DEBUG & DEBUG_SHADER_TIME)
+            emit_shader_time_end();
       }
 
       current_annotation = "URB write";

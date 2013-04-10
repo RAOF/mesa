@@ -47,13 +47,14 @@
 /**
  * Convert float32 to a float-like value with less exponent and mantissa
  * bits. The mantissa is still biased, and the mantissa still has an implied 1,
- * but there's no sign bit.
+ * and there may be a sign bit.
  *
  * @param src             (vector) float value to convert
  * @param mantissa_bits   the number of mantissa bits
  * @param exponent_bits   the number of exponent bits
+ * @param mantissa_start  the start position of the small float in result value
+ * @param has_sign        if the small float has a sign bit
  *
- * Unlike float_to_half using accurate method here.
  * This implements round-towards-zero (trunc) hence too large numbers get
  * converted to largest representable number, not infinity.
  * Small numbers may get converted to denorms, depending on normal
@@ -61,27 +62,32 @@
  * Note that compared to the references, below, we skip any rounding bias
  * since we do rounding towards zero - OpenGL allows rounding towards zero
  * (though not preferred) and DX10 even seems to require it.
- * Note that this will not do any packing - the value will
- * look like a "rescaled float" (except for Inf/NaN) but be returned
- * as int32.
+ * Note that this will pack mantissa, exponent and sign bit (if any) together,
+ * and shift the result to mantissa_start.
  *
  * ref http://fgiesen.wordpress.com/2012/03/28/half-to-float-done-quic/
  * ref https://gist.github.com/rygorous/2156668
  */
-static LLVMValueRef
-lp_build_float_to_smallfloat_nosign(struct gallivm_state *gallivm,
-                                    struct lp_type i32_type,
-                                    LLVMValueRef src,
-                                    unsigned mantissa_bits,
-                                    unsigned exponent_bits)
+LLVMValueRef
+lp_build_float_to_smallfloat(struct gallivm_state *gallivm,
+                             struct lp_type i32_type,
+                             LLVMValueRef src,
+                             unsigned mantissa_bits,
+                             unsigned exponent_bits,
+                             unsigned mantissa_start,
+                             boolean has_sign)
 {
    LLVMBuilderRef builder = gallivm->builder;
    LLVMValueRef i32_floatexpmask, i32_smallexpmask, magic, normal;
-   LLVMValueRef clamped, tmp, i32_roundmask, small_max, src_abs;
-   LLVMValueRef is_nan, is_posinf, is_nan_or_posinf, i32_qnanbit, nan_or_posinf;
+   LLVMValueRef rescale_src, i32_roundmask, small_max;
+   LLVMValueRef i32_qnanbit, shift, res;
+   LLVMValueRef is_nan_or_inf, nan_or_inf, mask, i32_src;
    struct lp_type f32_type = lp_type_float_vec(32, 32 * i32_type.length);
    struct lp_build_context f32_bld, i32_bld;
    LLVMValueRef zero = lp_build_const_vec(gallivm, f32_type, 0.0f);
+   unsigned exponent_start = mantissa_start + mantissa_bits;
+   boolean always_preserve_nans = true;
+   boolean maybe_correct_denorm_rounding = true;
 
    lp_build_context_init(&f32_bld, gallivm, f32_type);
    lp_build_context_init(&i32_bld, gallivm, i32_type);
@@ -90,24 +96,43 @@ lp_build_float_to_smallfloat_nosign(struct gallivm_state *gallivm,
                                              ((1 << exponent_bits) - 1) << 23);
    i32_floatexpmask = lp_build_const_int_vec(gallivm, i32_type, 0xff << 23);
 
-   /* "ordinary" number */
-   /* clamp to pos range (can still have sign bit if NaN or negative zero) */
-   clamped = lp_build_max(&f32_bld, src, zero);
-   clamped = LLVMBuildBitCast(builder, clamped, i32_bld.vec_type, "");
-   /* get rid of excess mantissa bits, and while here also potential sign bit */
-   i32_roundmask = lp_build_const_int_vec(gallivm, i32_type,
-                                          ~((1 << (23 - mantissa_bits)) - 1) |
-                                          0x7fffffff);
+   i32_src = LLVMBuildBitCast(builder, src, i32_bld.vec_type, "");
 
-   tmp = lp_build_and(&i32_bld, clamped, i32_roundmask);
-   tmp = LLVMBuildBitCast(builder, tmp, f32_bld.vec_type, "");
+   if (has_sign) {
+      rescale_src = src;
+   }
+   else {
+      /* clamp to pos range (can still have sign bit if NaN or negative zero) */
+      rescale_src = lp_build_max(&f32_bld, zero, src);
+   }
+   rescale_src = LLVMBuildBitCast(builder, rescale_src, i32_bld.vec_type, "");
+
+   /* "ordinary" number */
+   /*
+    * get rid of excess mantissa bits and sign bit
+    * This is only really needed for correct rounding of denorms I think
+    * but only if we use the preserve NaN path does using
+    * src_abs instead save us any instruction.
+    */
+   if (maybe_correct_denorm_rounding || !always_preserve_nans) {
+      i32_roundmask = lp_build_const_int_vec(gallivm, i32_type,
+                                             ~((1 << (23 - mantissa_bits)) - 1) &
+                                             0x7fffffff);
+      rescale_src = LLVMBuildBitCast(builder, rescale_src, i32_bld.vec_type, "");
+      rescale_src = lp_build_and(&i32_bld, rescale_src, i32_roundmask);
+      rescale_src = LLVMBuildBitCast(builder, rescale_src, f32_bld.vec_type, "");
+   }
+   else {
+      rescale_src = lp_build_abs(&f32_bld, src);
+   }
+
    /* bias exponent (and denormalize if necessary) */
    magic = lp_build_const_int_vec(gallivm, i32_type,
                                   ((1 << (exponent_bits - 1)) - 1) << 23);
    magic = LLVMBuildBitCast(builder, magic, f32_bld.vec_type, "");
-   normal = lp_build_mul(&f32_bld, tmp, magic);
+   normal = lp_build_mul(&f32_bld, rescale_src, magic);
 
-   /* clamp to max value */
+   /* clamp to max value - largest non-infinity number */
    small_max = lp_build_const_int_vec(gallivm, i32_type,
                                       (((1 << exponent_bits) - 2) << 23) |
                                       (((1 << mantissa_bits) - 1) << (23 - mantissa_bits)));
@@ -118,25 +143,88 @@ lp_build_float_to_smallfloat_nosign(struct gallivm_state *gallivm,
    /*
     * handle nan/inf cases
     * a little bit tricky since -Inf -> 0, +Inf -> +Inf, +-Nan -> +Nan
-    * Note that on a lucky day, we could simplify this a bit,
-    * by just using the max(src, zero) result - this will have -Inf
-    * clamped to 0, and MIGHT preserve the NaNs.
+    * (for no sign) else ->Inf -> ->Inf too.
+    * could use explicit "unordered" comparison checking for NaNs
+    * which might save us from calculating src_abs too.
+    * (Cannot actually save the comparison since we need to distinguish
+    * Inf and NaN cases anyway, but it would be better for AVX.)
     */
-   src_abs = lp_build_abs(&f32_bld, src);
-   src_abs = LLVMBuildBitCast(builder, src_abs, i32_bld.vec_type, "");
-   src = LLVMBuildBitCast(builder, src, i32_bld.vec_type, "");
-   is_nan = lp_build_compare(gallivm, i32_type, PIPE_FUNC_GREATER,
-                             src_abs, i32_floatexpmask);
-   is_posinf = lp_build_compare(gallivm, i32_type, PIPE_FUNC_EQUAL,
-                                src, i32_floatexpmask);
-   is_nan_or_posinf = lp_build_and(&i32_bld, is_nan, is_posinf);
-   /* could also set more mantissa bits but need at least the highest mantissa bit */
-   i32_qnanbit = lp_build_const_vec(gallivm, i32_type, 1 << 22);
-   /* combine maxexp with qnanbit */
-   nan_or_posinf = lp_build_or(&i32_bld, i32_smallexpmask,
-                               lp_build_and(&i32_bld, is_nan, i32_qnanbit));
+   if (always_preserve_nans) {
+      LLVMValueRef infcheck_src, is_inf, is_nan;
+      LLVMValueRef src_abs = lp_build_abs(&f32_bld, src);
+      src_abs = LLVMBuildBitCast(builder, src_abs, i32_bld.vec_type, "");
 
-   return lp_build_select(&i32_bld, is_nan_or_posinf, nan_or_posinf, normal);
+      if (has_sign) {
+         infcheck_src = src_abs;
+      }
+      else {
+         infcheck_src = i32_src;
+      }
+      is_nan = lp_build_compare(gallivm, i32_type, PIPE_FUNC_GREATER,
+                                src_abs, i32_floatexpmask);
+      is_inf = lp_build_compare(gallivm, i32_type, PIPE_FUNC_EQUAL,
+                                infcheck_src, i32_floatexpmask);
+      is_nan_or_inf = lp_build_or(&i32_bld, is_nan, is_inf);
+      /* could also set more mantissa bits but need at least the highest mantissa bit */
+      i32_qnanbit = lp_build_const_vec(gallivm, i32_type, 1 << 22);
+      /* combine maxexp with qnanbit */
+      nan_or_inf = lp_build_or(&i32_bld, i32_smallexpmask,
+                               lp_build_and(&i32_bld, is_nan, i32_qnanbit));
+   }
+   else {
+      /*
+       * A couple simplifications, with mostly 2 drawbacks (so disabled):
+       * - it will promote some SNaNs (those which only had bits set
+       * in the mantissa part which got chopped off) to +-Infinity.
+       * (Those bits get chopped off anyway later so can as well use
+       * rescale_src instead of src_abs here saving the calculation of that.)
+       * - for no sign case, it relies on the max() being used for rescale_src
+       * to give back the NaN (which is NOT ieee754r behavior, but should work
+       * with sse2 on a full moon (rather if I got the operand order right) -
+       * we _don't_ have well-defined behavior specified with min/max wrt NaNs,
+       * however, and if it gets converted to cmp/select it may not work (we
+       * don't really have specified behavior for cmp wrt NaNs neither).
+       */
+      rescale_src = LLVMBuildBitCast(builder, rescale_src, i32_bld.vec_type, "");
+      is_nan_or_inf = lp_build_compare(gallivm, i32_type, PIPE_FUNC_GEQUAL,
+                                       rescale_src, i32_floatexpmask);
+      /* note this will introduce excess exponent bits */
+      nan_or_inf = rescale_src;
+   }
+   res = lp_build_select(&i32_bld, is_nan_or_inf, nan_or_inf, normal);
+
+   if (mantissa_start > 0 || !always_preserve_nans) {
+      /* mask off excess bits */
+      unsigned maskbits = (1 << (mantissa_bits + exponent_bits)) - 1;
+      mask = lp_build_const_int_vec(gallivm, i32_type,
+                                    maskbits << (23 - mantissa_bits));
+      res = lp_build_and(&i32_bld, res, mask);
+   }
+
+   /* add back sign bit at right position */
+   if (has_sign) {
+      LLVMValueRef sign;
+      struct lp_type u32_type = lp_type_uint_vec(32, 32 * i32_type.length);
+      struct lp_build_context u32_bld;
+      lp_build_context_init(&u32_bld, gallivm, u32_type);
+
+      mask = lp_build_const_int_vec(gallivm, i32_type, 0x80000000);
+      shift = lp_build_const_int_vec(gallivm, i32_type, 8 - exponent_bits);
+      sign = lp_build_and(&i32_bld, mask, i32_src);
+      sign = lp_build_shr(&u32_bld, sign, shift);
+      res = lp_build_or(&i32_bld, sign, res);
+   }
+
+   /* shift to final position */
+   if (exponent_start < 23) {
+      shift = lp_build_const_int_vec(gallivm, i32_type, 23 - exponent_start);
+      res = lp_build_shr(&i32_bld, res, shift);
+   }
+   else {
+      shift = lp_build_const_int_vec(gallivm, i32_type, exponent_start - 23);
+      res = lp_build_shl(&i32_bld, res, shift);
+   }
+   return res;
 }
 
 
@@ -149,7 +237,7 @@ LLVMValueRef
 lp_build_float_to_r11g11b10(struct gallivm_state *gallivm,
                             LLVMValueRef *src)
 {
-   LLVMValueRef dst, rcomp, bcomp, gcomp, shift, mask;
+   LLVMValueRef dst, rcomp, bcomp, gcomp;
    struct lp_build_context i32_bld;
    LLVMTypeRef src_type = LLVMTypeOf(*src);
    unsigned src_length = LLVMGetTypeKind(src_type) == LLVMVectorTypeKind ?
@@ -158,25 +246,12 @@ lp_build_float_to_r11g11b10(struct gallivm_state *gallivm,
 
    lp_build_context_init(&i32_bld, gallivm, i32_type);
 
-   /* "rescale" - this does the actual conversion except the packing */
-   rcomp = lp_build_float_to_smallfloat_nosign(gallivm, i32_type, src[0], 6, 5);
-   gcomp = lp_build_float_to_smallfloat_nosign(gallivm, i32_type, src[1], 6, 5);
-   bcomp = lp_build_float_to_smallfloat_nosign(gallivm, i32_type, src[2], 5, 5);
+   /* "rescale" and put in right position */
+   rcomp = lp_build_float_to_smallfloat(gallivm, i32_type, src[0], 6, 5, 0, false);
+   gcomp = lp_build_float_to_smallfloat(gallivm, i32_type, src[1], 6, 5, 11, false);
+   bcomp = lp_build_float_to_smallfloat(gallivm, i32_type, src[2], 5, 5, 22, false);
 
-   /* pack rescaled SoA floats to r11g11b10 AoS values */
-   shift = lp_build_const_int_vec(gallivm, i32_type, 23 - 6);
-   rcomp = lp_build_shr(&i32_bld, rcomp, shift);
-
-   shift = lp_build_const_int_vec(gallivm, i32_type, 23 - 17);
-   mask = lp_build_const_int_vec(gallivm, i32_type, 0x7ff << 11);
-   gcomp = lp_build_shr(&i32_bld, gcomp, shift);
-   gcomp = lp_build_and(&i32_bld, gcomp, mask);
-
-   shift = lp_build_const_int_vec(gallivm, i32_type, 27 - 23);
-   mask = lp_build_const_int_vec(gallivm, i32_type, 0x3ff << 22);
-   bcomp = lp_build_shl(&i32_bld, bcomp, shift);
-   bcomp = lp_build_and(&i32_bld, bcomp, mask);
-
+   /* combine the values */
    dst = lp_build_or(&i32_bld, rcomp, gcomp);
    return lp_build_or(&i32_bld, dst, bcomp);
 }
@@ -186,30 +261,34 @@ lp_build_float_to_r11g11b10(struct gallivm_state *gallivm,
  * Convert a float-like value with less exponent and mantissa
  * bits than a normal float32 to a float32. The mantissa of
  * the source value is assumed to have an implied 1, and the exponent
- * is biased. There are no negative values.
- * The source value to extract must be in a 32bit int.
- * While this helper is generic, it is only ever going to be useful for
- * r11g11b10 (no other common format exists with the same properties).
+ * is biased. There may be a sign bit.
+ * The source value to extract must be in a 32bit int (bits not part of
+ * the value to convert will be masked off).
+ * This works for things like 11-bit floats or half-floats,
+ * mantissa, exponent (and sign if present) must be packed
+ * the same as they are in a ordinary float.
  *
  * @param src             (vector) value to convert
  * @param mantissa_bits   the number of mantissa bits
  * @param exponent_bits   the number of exponent bits
  * @param mantissa_start  the bit start position of the packed component
+ * @param has_sign        if the small float has a sign bit
  *
  * ref http://fgiesen.wordpress.com/2012/03/28/half-to-float-done-quic/
  * ref https://gist.github.com/rygorous/2156668
  */
-static LLVMValueRef
-lp_build_smallfloat_nosign_to_float(struct gallivm_state *gallivm,
-                                    struct lp_type f32_type,
-                                    LLVMValueRef src,
-                                    unsigned mantissa_bits,
-                                    unsigned exponent_bits,
-                                    unsigned mantissa_start)
+LLVMValueRef
+lp_build_smallfloat_to_float(struct gallivm_state *gallivm,
+                             struct lp_type f32_type,
+                             LLVMValueRef src,
+                             unsigned mantissa_bits,
+                             unsigned exponent_bits,
+                             unsigned mantissa_start,
+                             boolean has_sign)
 {
    LLVMBuilderRef builder = gallivm->builder;
    LLVMValueRef smallexpmask, i32_floatexpmask, magic;
-   LLVMValueRef wasinfnan, tmp, res, shift, mask;
+   LLVMValueRef wasinfnan, tmp, res, shift, maskabs, srcabs, sign;
    unsigned exponent_start = mantissa_start + mantissa_bits;
    struct lp_type i32_type = lp_type_int_vec(32, 32 * f32_type.length);
    struct lp_build_context f32_bld, i32_bld;
@@ -226,11 +305,11 @@ lp_build_smallfloat_nosign_to_float(struct gallivm_state *gallivm,
       shift = lp_build_const_int_vec(gallivm, i32_type, exponent_start - 23);
       src = lp_build_shr(&i32_bld, src, shift);
    }
-   mask = lp_build_const_int_vec(gallivm, i32_type,
-                                 ((1 << (mantissa_bits + exponent_bits)) - 1) <<
-                                 (23 - mantissa_bits));
-   src = lp_build_and(&i32_bld, src, mask);
-   src = LLVMBuildBitCast(builder, src, f32_bld.vec_type, "");
+   maskabs = lp_build_const_int_vec(gallivm, i32_type,
+                                    ((1 << (mantissa_bits + exponent_bits)) - 1)
+                                    << (23 - mantissa_bits));
+   srcabs = lp_build_and(&i32_bld, src, maskabs);
+   srcabs = LLVMBuildBitCast(builder, srcabs, f32_bld.vec_type, "");
 
    /* now do the actual scaling */
    smallexpmask = lp_build_const_int_vec(gallivm, i32_type,
@@ -245,18 +324,26 @@ lp_build_smallfloat_nosign_to_float(struct gallivm_state *gallivm,
    magic = LLVMBuildBitCast(builder, magic, f32_bld.vec_type, "");
 
    /* adjust exponent and fix denorms */
-   res = lp_build_mul(&f32_bld, src, magic);
+   res = lp_build_mul(&f32_bld, srcabs, magic);
 
    /*
     * if exp was max (== NaN or Inf) set new exp to max (keep mantissa),
     * so a simple "or" will do (because exp adjust will leave mantissa intact)
     */
-   /* use float compare (better for AVX 8-wide / no AVX2 though otherwise should use int) */
-   smallexpmask = LLVMBuildBitCast(builder, magic, f32_bld.vec_type, "");
-   wasinfnan = lp_build_compare(gallivm, f32_type, PIPE_FUNC_GEQUAL, src, smallexpmask);
+   /* use float compare (better for AVX 8-wide / no AVX2 but else should use int) */
+   smallexpmask = LLVMBuildBitCast(builder, smallexpmask, f32_bld.vec_type, "");
+   wasinfnan = lp_build_compare(gallivm, f32_type, PIPE_FUNC_GEQUAL, srcabs, smallexpmask);
    res = LLVMBuildBitCast(builder, res, i32_bld.vec_type, "");
    tmp = lp_build_and(&i32_bld, i32_floatexpmask, wasinfnan);
    res = lp_build_or(&i32_bld, tmp, res);
+
+   if (has_sign) {
+      LLVMValueRef signmask = lp_build_const_int_vec(gallivm, i32_type, 0x80000000);
+      shift = lp_build_const_int_vec(gallivm, i32_type, 8 - exponent_bits);
+      sign = lp_build_shl(&i32_bld, src, shift);
+      sign = lp_build_and(&i32_bld, signmask, sign);
+      res = lp_build_or(&i32_bld, res, sign);
+   }
 
    return LLVMBuildBitCast(builder, res, f32_bld.vec_type, "");
 }
@@ -278,9 +365,9 @@ lp_build_r11g11b10_to_float(struct gallivm_state *gallivm,
                             LLVMGetVectorSize(src_type) : 1;
    struct lp_type f32_type = lp_type_float_vec(32, 32 * src_length);
 
-   dst[0] = lp_build_smallfloat_nosign_to_float(gallivm, f32_type, src, 6, 5, 0);
-   dst[1] = lp_build_smallfloat_nosign_to_float(gallivm, f32_type, src, 6, 5, 11);
-   dst[2] = lp_build_smallfloat_nosign_to_float(gallivm, f32_type, src, 5, 5, 22);
+   dst[0] = lp_build_smallfloat_to_float(gallivm, f32_type, src, 6, 5, 0, false);
+   dst[1] = lp_build_smallfloat_to_float(gallivm, f32_type, src, 6, 5, 11, false);
+   dst[2] = lp_build_smallfloat_to_float(gallivm, f32_type, src, 5, 5, 22, false);
 
    /* Just set alpha to one */
    dst[3] = lp_build_one(gallivm, f32_type);

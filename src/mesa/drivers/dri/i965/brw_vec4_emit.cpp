@@ -674,7 +674,7 @@ vec4_generator::generate_vs_instruction(vec4_instruction *instruction,
       break;
 
    case SHADER_OPCODE_SHADER_TIME_ADD:
-      brw_shader_time_add(p, inst->base_mrf, SURF_INDEX_VS_SHADER_TIME);
+      brw_shader_time_add(p, src[0], SURF_INDEX_VS_SHADER_TIME);
       break;
 
    default:
@@ -741,6 +741,8 @@ vec4_generator::generate_code(exec_list *instructions)
       brw_set_predicate_inverse(p, inst->predicate_inverse);
       brw_set_saturate(p, inst->saturate);
       brw_set_mask_control(p, inst->force_writemask_all);
+
+      unsigned pre_emit_nr_insn = p->nr_insn;
 
       switch (inst->opcode) {
       case BRW_OPCODE_MOV:
@@ -866,6 +868,19 @@ vec4_generator::generate_code(exec_list *instructions)
       default:
 	 generate_vs_instruction(inst, dst, src);
 	 break;
+      }
+
+      if (inst->no_dd_clear || inst->no_dd_check) {
+         assert(p->nr_insn == pre_emit_nr_insn + 1 ||
+                !"no_dd_check or no_dd_clear set for IR emitting more "
+                "than 1 instruction");
+
+         struct brw_instruction *last = &p->store[pre_emit_nr_insn];
+
+         if (inst->no_dd_clear)
+            last->header.dependency_control |= BRW_DEPENDENCY_NOTCLEARED;
+         if (inst->no_dd_check)
+            last->header.dependency_control |= BRW_DEPENDENCY_NOTCHECKED;
       }
 
       if (unlikely(INTEL_DEBUG & DEBUG_VS)) {

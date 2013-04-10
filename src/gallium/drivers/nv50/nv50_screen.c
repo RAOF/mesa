@@ -65,11 +65,6 @@ nv50_screen_is_format_supported(struct pipe_screen *pscreen,
       if (nv50_screen(pscreen)->tesla->oclass < NVA0_3D_CLASS)
          return FALSE;
       break;
-   case PIPE_FORMAT_R8G8B8A8_UNORM:
-   case PIPE_FORMAT_R8G8B8X8_UNORM:
-      /* HACK: GL requires equal formats for MS resolve and window is BGRA */
-      if (bindings & PIPE_BIND_RENDER_TARGET)
-         return FALSE;
    default:
       break;
    }
@@ -189,6 +184,8 @@ nv50_screen_get_param(struct pipe_screen *pscreen, enum pipe_cap param)
       return 0;
    case PIPE_CAP_PREFER_BLIT_BASED_TEXTURE_TRANSFER:
       return 1;
+   case PIPE_CAP_QUERY_PIPELINE_STATISTICS:
+      return 0;
    default:
       NOUVEAU_ERR("unknown PIPE_CAP %d\n", param);
       return 0;

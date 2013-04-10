@@ -42,7 +42,7 @@ static void si_pipe_shader_vs(struct pipe_context *ctx, struct si_pipe_shader *s
 	struct r600_context *rctx = (struct r600_context *)ctx;
 	struct si_pm4_state *pm4;
 	unsigned num_sgprs, num_user_sgprs;
-	unsigned nparams, i;
+	unsigned nparams, i, vgpr_comp_cnt;
 	uint64_t va;
 
 	si_pm4_delete_state(rctx, vs, shader->pm4);
@@ -83,9 +83,12 @@ static void si_pipe_shader_vs(struct pipe_context *ctx, struct si_pipe_shader *s
 	num_sgprs += 2;
 	assert(num_sgprs <= 104);
 
+	vgpr_comp_cnt = shader->shader.uses_instanceid ? 3 : 0;
+
 	si_pm4_set_reg(pm4, R_00B128_SPI_SHADER_PGM_RSRC1_VS,
 		       S_00B128_VGPRS((shader->num_vgprs - 1) / 4) |
-		       S_00B128_SGPRS((num_sgprs - 1) / 8));
+		       S_00B128_SGPRS((num_sgprs - 1) / 8) |
+		       S_00B128_VGPR_COMP_CNT(vgpr_comp_cnt));
 	si_pm4_set_reg(pm4, R_00B12C_SPI_SHADER_PGM_RSRC2_VS,
 		       S_00B12C_USER_SGPR(num_user_sgprs));
 
@@ -142,7 +145,7 @@ static void si_pipe_shader_ps(struct pipe_context *ctx, struct si_pipe_shader *s
 		if (shader->shader.output[i].name == TGSI_SEMANTIC_STENCIL)
 			db_shader_control |= S_02880C_STENCIL_TEST_VAL_EXPORT_ENABLE(1);
 	}
-	if (shader->shader.uses_kill || shader->key.alpha_func != PIPE_FUNC_ALWAYS)
+	if (shader->shader.uses_kill || shader->key.ps.alpha_func != PIPE_FUNC_ALWAYS)
 		db_shader_control |= S_02880C_KILL_ENABLE(1);
 
 	exports_ps = 0;
@@ -276,10 +279,8 @@ static bool si_update_draw_info_state(struct r600_context *rctx,
 		       info->indexed ? info->index_bias : info->start);
 	si_pm4_set_reg(pm4, R_02840C_VGT_MULTI_PRIM_IB_RESET_INDX, info->restart_index);
 	si_pm4_set_reg(pm4, R_028A94_VGT_MULTI_PRIM_IB_RESET_EN, info->primitive_restart);
-#if 0
-	si_pm4_set_reg(pm4, R_03CFF0_SQ_VTX_BASE_VTX_LOC, 0);
-	si_pm4_set_reg(pm4, R_03CFF4_SQ_VTX_START_INST_LOC, info->start_instance);
-#endif
+	si_pm4_set_reg(pm4, R_00B130_SPI_SHADER_USER_DATA_VS_0 + SI_SGPR_START_INSTANCE * 4,
+		       info->start_instance);
 
         if (prim == V_008958_DI_PT_LINELIST)
                 ls_mask = 1;
@@ -328,7 +329,7 @@ bcolor:
 
 		if (ps->input[i].interpolate == TGSI_INTERPOLATE_CONSTANT ||
 		    (ps->input[i].interpolate == TGSI_INTERPOLATE_COLOR &&
-		     rctx->ps_shader->current->key.flatshade)) {
+		     rctx->ps_shader->current->key.ps.flatshade)) {
 			tmp |= S_028644_FLAT_SHADE(1);
 		}
 
@@ -355,7 +356,7 @@ bcolor:
 			       tmp);
 
 		if (name == TGSI_SEMANTIC_COLOR &&
-		    rctx->ps_shader->current->key.color_two_side) {
+		    rctx->ps_shader->current->key.ps.color_two_side) {
 			name = TGSI_SEMANTIC_BCOLOR;
 			param_offset++;
 			goto bcolor;
@@ -368,7 +369,7 @@ bcolor:
 static void si_update_derived_state(struct r600_context *rctx)
 {
 	struct pipe_context * ctx = (struct pipe_context*)rctx;
-	unsigned ps_dirty = 0;
+	unsigned vs_dirty = 0, ps_dirty = 0;
 
 	if (!rctx->blitter->running) {
 		/* Flush depth textures which need to be flushed. */
@@ -380,11 +381,19 @@ static void si_update_derived_state(struct r600_context *rctx)
 		}
 	}
 
-	si_shader_select(ctx, rctx->ps_shader, &ps_dirty);
+	si_shader_select(ctx, rctx->vs_shader, &vs_dirty);
 
 	if (!rctx->vs_shader->current->pm4) {
 		si_pipe_shader_vs(ctx, rctx->vs_shader->current);
+		vs_dirty = 0;
 	}
+
+	if (vs_dirty) {
+		si_pm4_bind_state(rctx, vs, rctx->vs_shader->current->pm4);
+	}
+
+
+	si_shader_select(ctx, rctx->ps_shader, &ps_dirty);
 
 	if (!rctx->ps_shader->current->pm4) {
 		si_pipe_shader_ps(ctx, rctx->ps_shader->current);
@@ -421,7 +430,7 @@ static void si_vertex_buffer_update(struct r600_context *rctx)
 	unsigned i, count;
 	uint64_t va;
 
-	si_pm4_inval_vertex_cache(pm4);
+	si_pm4_inval_texture_cache(pm4);
 
 	/* bind vertex buffer once */
 	count = rctx->vertex_elements->count;
@@ -579,6 +588,12 @@ void si_draw_vbo(struct pipe_context *ctx, const struct pipe_draw_info *info)
 	si_pm4_emit_dirty(rctx);
 	rctx->pm4_dirty_cdwords = 0;
 
+#if R600_TRACE_CS
+	if (rctx->screen->trace_bo) {
+		r600_trace_emit(rctx);
+	}
+#endif
+
 #if 0
 	/* Enable stream out if needed. */
 	if (rctx->streamout_start) {
@@ -586,7 +601,6 @@ void si_draw_vbo(struct pipe_context *ctx, const struct pipe_draw_info *info)
 		rctx->streamout_start = FALSE;
 	}
 #endif
-
 
 	rctx->flags |= R600_CONTEXT_DST_CACHES_DIRTY;
 

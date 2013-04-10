@@ -174,7 +174,6 @@ public:
            fs_reg src0, fs_reg src1,fs_reg src2);
 
    bool equals(fs_inst *inst);
-   int regs_written();
    bool overwrites_reg(const fs_reg &reg);
    bool is_tex();
    bool is_math();
@@ -192,6 +191,7 @@ public:
    uint8_t flag_subreg;
 
    int mlen; /**< SEND message length */
+   int regs_written; /**< Number of vgrfs written by a SEND message, or 1 */
    int base_mrf; /**< First MRF in the SEND message, if mlen is nonzero. */
    uint32_t texture_offset; /**< Texture offset bitfield */
    int sampler;
@@ -294,7 +294,8 @@ public:
 					   fs_reg reg);
 
    exec_list VARYING_PULL_CONSTANT_LOAD(fs_reg dst, fs_reg surf_index,
-                                        fs_reg offset);
+                                        fs_reg varying_offset,
+                                        uint32_t const_offset);
 
    bool run();
    void setup_payload_gen4();
@@ -424,7 +425,7 @@ public:
    void dump_instructions();
    void dump_instruction(fs_inst *inst);
 
-   const struct gl_fragment_program *fp;
+   struct gl_fragment_program *fp;
    struct brw_wm_compile *c;
    unsigned int sanity_param_count;
 
@@ -540,7 +541,8 @@ private:
                                                  struct brw_reg surf_index,
                                                  struct brw_reg offset);
    void generate_varying_pull_constant_load(fs_inst *inst, struct brw_reg dst,
-                                            struct brw_reg index);
+                                            struct brw_reg index,
+                                            struct brw_reg offset);
    void generate_varying_pull_constant_load_gen7(fs_inst *inst,
                                                  struct brw_reg dst,
                                                  struct brw_reg index,
@@ -558,6 +560,11 @@ private:
    void generate_unpack_half_2x16_split(fs_inst *inst,
                                         struct brw_reg dst,
                                         struct brw_reg src);
+
+   void generate_shader_time_add(fs_inst *inst,
+                                 struct brw_reg payload,
+                                 struct brw_reg offset,
+                                 struct brw_reg value);
 
    void patch_discard_jumps_to_fb_writes();
 

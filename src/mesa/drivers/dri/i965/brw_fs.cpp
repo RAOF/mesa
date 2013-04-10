@@ -60,6 +60,9 @@ fs_inst::init()
    this->src[0] = reg_undef;
    this->src[1] = reg_undef;
    this->src[2] = reg_undef;
+
+   /* This will be the case for almost all instructions. */
+   this->regs_written = 1;
 }
 
 fs_inst::fs_inst()
@@ -229,39 +232,58 @@ fs_visitor::CMP(fs_reg dst, fs_reg src0, fs_reg src1, uint32_t condition)
 
 exec_list
 fs_visitor::VARYING_PULL_CONSTANT_LOAD(fs_reg dst, fs_reg surf_index,
-                                       fs_reg offset)
+                                       fs_reg varying_offset,
+                                       uint32_t const_offset)
 {
    exec_list instructions;
    fs_inst *inst;
 
-   if (intel->gen >= 7) {
-      inst = new(mem_ctx) fs_inst(FS_OPCODE_VARYING_PULL_CONSTANT_LOAD_GEN7,
-                                  dst, surf_index, offset);
-      instructions.push_tail(inst);
-   } else {
-      int base_mrf = 13;
-      bool header_present = true;
+   /* We have our constant surface use a pitch of 4 bytes, so our index can
+    * be any component of a vector, and then we load 4 contiguous
+    * components starting from that.
+    *
+    * We break down the const_offset to a portion added to the variable
+    * offset and a portion done using reg_offset, which means that if you
+    * have GLSL using something like "uniform vec4 a[20]; gl_FragColor =
+    * a[i]", we'll temporarily generate 4 vec4 loads from offset i * 4, and
+    * CSE can later notice that those loads are all the same and eliminate
+    * the redundant ones.
+    */
+   fs_reg vec4_offset = fs_reg(this, glsl_type::int_type);
+   instructions.push_tail(ADD(vec4_offset,
+                              varying_offset, const_offset & ~3));
 
-      fs_reg mrf = fs_reg(MRF, base_mrf + header_present);
-      mrf.type = BRW_REGISTER_TYPE_D;
-
-      /* On gen6+ we want the dword offset passed in, but on gen4/5 we need a
-       * dword-aligned byte offset.
+   int scale = 1;
+   if (intel->gen == 4 && dispatch_width == 8) {
+      /* Pre-gen5, we can either use a SIMD8 message that requires (header,
+       * u, v, r) as parameters, or we can just use the SIMD16 message
+       * consisting of (header, u).  We choose the second, at the cost of a
+       * longer return length.
        */
-      if (intel->gen == 6) {
-         instructions.push_tail(MOV(mrf, offset));
-      } else {
-         instructions.push_tail(MUL(mrf, offset, fs_reg(4)));
-      }
-      inst = MOV(mrf, offset);
-      inst = new(mem_ctx) fs_inst(FS_OPCODE_VARYING_PULL_CONSTANT_LOAD,
-                                  dst, surf_index);
-      inst->header_present = header_present;
-      inst->base_mrf = base_mrf;
-      inst->mlen = header_present + dispatch_width / 8;
-
-      instructions.push_tail(inst);
+      scale = 2;
    }
+
+   enum opcode op;
+   if (intel->gen >= 7)
+      op = FS_OPCODE_VARYING_PULL_CONSTANT_LOAD_GEN7;
+   else
+      op = FS_OPCODE_VARYING_PULL_CONSTANT_LOAD;
+   fs_reg vec4_result = fs_reg(GRF, virtual_grf_alloc(4 * scale), dst.type);
+   inst = new(mem_ctx) fs_inst(op, vec4_result, surf_index, vec4_offset);
+   inst->regs_written = 4 * scale;
+   instructions.push_tail(inst);
+
+   if (intel->gen < 7) {
+      inst->base_mrf = 13;
+      inst->header_present = true;
+      if (intel->gen == 4)
+         inst->mlen = 3;
+      else
+         inst->mlen = 1 + dispatch_width / 8;
+   }
+
+   vec4_result.reg_offset += (const_offset & 3) * scale;
+   instructions.push_tail(MOV(dst, vec4_result));
 
    return instructions;
 }
@@ -307,26 +329,13 @@ fs_inst::equals(fs_inst *inst)
            offset == inst->offset);
 }
 
-int
-fs_inst::regs_written()
-{
-   if (is_tex())
-      return 4;
-
-   /* The SINCOS and INT_DIV_QUOTIENT_AND_REMAINDER math functions return 2,
-    * but we don't currently use them...nor do we have an opcode for them.
-    */
-
-   return 1;
-}
-
 bool
 fs_inst::overwrites_reg(const fs_reg &reg)
 {
    return (reg.file == dst.file &&
            reg.reg == dst.reg &&
            reg.reg_offset >= dst.reg_offset  &&
-           reg.reg_offset < dst.reg_offset + regs_written());
+           reg.reg_offset < dst.reg_offset + regs_written);
 }
 
 bool
@@ -338,7 +347,8 @@ fs_inst::is_tex()
            opcode == SHADER_OPCODE_TXF ||
            opcode == SHADER_OPCODE_TXF_MS ||
            opcode == SHADER_OPCODE_TXL ||
-           opcode == SHADER_OPCODE_TXS);
+           opcode == SHADER_OPCODE_TXS ||
+           opcode == SHADER_OPCODE_LOD);
 }
 
 bool
@@ -377,6 +387,7 @@ bool
 fs_inst::is_send_from_grf()
 {
    return (opcode == FS_OPCODE_VARYING_PULL_CONSTANT_LOAD_GEN7 ||
+           opcode == SHADER_OPCODE_SHADER_TIME_ADD ||
            (opcode == FS_OPCODE_UNIFORM_PULL_CONSTANT_LOAD &&
             src[1].file == GRF));
 }
@@ -605,31 +616,18 @@ void
 fs_visitor::emit_shader_time_write(enum shader_time_shader_type type,
                                    fs_reg value)
 {
-   /* Choose an index in the buffer and set up tracking information for our
-    * printouts.
-    */
-   int shader_time_index = brw->shader_time.num_entries++;
-   assert(shader_time_index <= brw->shader_time.max_entries);
-   brw->shader_time.types[shader_time_index] = type;
-   if (prog) {
-      _mesa_reference_shader_program(ctx,
-                                     &brw->shader_time.programs[shader_time_index],
-                                     prog);
-   }
+   int shader_time_index = brw_get_shader_time_index(brw, prog, &fp->Base,
+                                                     type);
+   fs_reg offset = fs_reg(shader_time_index * SHADER_TIME_STRIDE);
 
-   int base_mrf = 6;
+   fs_reg payload;
+   if (dispatch_width == 8)
+      payload = fs_reg(this, glsl_type::uvec2_type);
+   else
+      payload = fs_reg(this, glsl_type::uint_type);
 
-   fs_reg offset_mrf = fs_reg(MRF, base_mrf);
-   offset_mrf.type = BRW_REGISTER_TYPE_UD;
-   emit(MOV(offset_mrf, fs_reg(shader_time_index * SHADER_TIME_STRIDE)));
-
-   fs_reg time_mrf = fs_reg(MRF, base_mrf + 1);
-   time_mrf.type = BRW_REGISTER_TYPE_UD;
-   emit(MOV(time_mrf, value));
-
-   fs_inst *inst = emit(fs_inst(SHADER_OPCODE_SHADER_TIME_ADD));
-   inst->base_mrf = base_mrf;
-   inst->mlen = 2;
+   emit(fs_inst(SHADER_OPCODE_SHADER_TIME_ADD,
+                fs_reg(), payload, offset, value));
 }
 
 void
@@ -744,16 +742,15 @@ fs_visitor::implied_mrf_writes(fs_inst *inst)
    case SHADER_OPCODE_TXF_MS:
    case SHADER_OPCODE_TXL:
    case SHADER_OPCODE_TXS:
+   case SHADER_OPCODE_LOD:
       return 1;
-   case SHADER_OPCODE_SHADER_TIME_ADD:
-      return 0;
    case FS_OPCODE_FB_WRITE:
       return 2;
    case FS_OPCODE_UNIFORM_PULL_CONSTANT_LOAD:
    case FS_OPCODE_UNSPILL:
       return 1;
    case FS_OPCODE_VARYING_PULL_CONSTANT_LOAD:
-      return inst->header_present;
+      return inst->mlen;
    case FS_OPCODE_SPILL:
       return 2;
    default:
@@ -1042,31 +1039,24 @@ fs_visitor::emit_general_interpolation(ir_variable *ir)
 		* attribute, as well as making brw_vs_constval.c
 		* handle varyings other than gl_TexCoord.
 		*/
-	       if (location >= VARYING_SLOT_TEX0 &&
-		   location <= VARYING_SLOT_TEX7 &&
-		   k == 3 && !(c->key.proj_attrib_mask
-                               & BITFIELD64_BIT(location))) {
-		  emit(BRW_OPCODE_MOV, attr, fs_reg(1.0f));
-	       } else {
-		  struct brw_reg interp = interp_reg(location, k);
-                  emit_linterp(attr, fs_reg(interp), interpolation_mode,
-                               ir->centroid);
-                  if (brw->needs_unlit_centroid_workaround && ir->centroid) {
-                     /* Get the pixel/sample mask into f0 so that we know
-                      * which pixels are lit.  Then, for each channel that is
-                      * unlit, replace the centroid data with non-centroid
-                      * data.
-                      */
-                     emit(FS_OPCODE_MOV_DISPATCH_TO_FLAGS, attr);
-                     fs_inst *inst = emit_linterp(attr, fs_reg(interp),
-                                                  interpolation_mode, false);
-                     inst->predicate = BRW_PREDICATE_NORMAL;
-                     inst->predicate_inverse = true;
-                  }
-		  if (intel->gen < 6) {
-		     emit(BRW_OPCODE_MUL, attr, attr, this->pixel_w);
-		  }
-	       }
+               struct brw_reg interp = interp_reg(location, k);
+               emit_linterp(attr, fs_reg(interp), interpolation_mode,
+                            ir->centroid);
+               if (brw->needs_unlit_centroid_workaround && ir->centroid) {
+                  /* Get the pixel/sample mask into f0 so that we know
+                   * which pixels are lit.  Then, for each channel that is
+                   * unlit, replace the centroid data with non-centroid
+                   * data.
+                   */
+                  emit(FS_OPCODE_MOV_DISPATCH_TO_FLAGS, attr);
+                  fs_inst *inst = emit_linterp(attr, fs_reg(interp),
+                                               interpolation_mode, false);
+                  inst->predicate = BRW_PREDICATE_NORMAL;
+                  inst->predicate_inverse = true;
+               }
+               if (intel->gen < 6) {
+                  emit(BRW_OPCODE_MUL, attr, attr, this->pixel_w);
+               }
 	       attr.reg_offset++;
 	    }
 
@@ -1366,8 +1356,15 @@ fs_visitor::split_virtual_grfs()
       /* If there's a SEND message that requires contiguous destination
        * registers, no splitting is allowed.
        */
-      if (inst->regs_written() > 1) {
+      if (inst->regs_written > 1) {
 	 split_grf[inst->dst.reg] = false;
+      }
+
+      /* If we're sending from a GRF, don't split it, on the assumption that
+       * the send is reading the whole thing.
+       */
+      if (inst->is_send_from_grf()) {
+         split_grf[inst->src[0].reg] = false;
       }
    }
 
@@ -1626,15 +1623,13 @@ fs_visitor::move_uniform_array_access_to_pull_constants()
          base_ir = inst->ir;
          current_annotation = inst->annotation;
 
-         fs_reg offset = fs_reg(this, glsl_type::int_type);
-         inst->insert_before(ADD(offset, *inst->src[i].reladdr,
-                                 fs_reg(pull_constant_loc[uniform] +
-                                        inst->src[i].reg_offset)));
-
          fs_reg surf_index = fs_reg((unsigned)SURF_INDEX_FRAG_CONST_BUFFER);
          fs_reg temp = fs_reg(this, glsl_type::float_type);
          exec_list list = VARYING_PULL_CONSTANT_LOAD(temp,
-                                                     surf_index, offset);
+                                                     surf_index,
+                                                     *inst->src[i].reladdr,
+                                                     pull_constant_loc[uniform] +
+                                                     inst->src[i].reg_offset);
          inst->insert_before(&list);
 
          inst->src[i].file = temp.file;
@@ -2086,6 +2081,12 @@ fs_visitor::compute_to_mrf()
 	       break;
 	    }
 
+            /* Things returning more than one register would need us to
+             * understand coalescing out more than one MOV at a time.
+             */
+            if (scan_inst->regs_written > 1)
+               break;
+
 	    /* SEND instructions can't have MRF as a destination. */
 	    if (scan_inst->mlen)
 	       break;
@@ -2300,7 +2301,7 @@ void
 fs_visitor::insert_gen4_pre_send_dependency_workarounds(fs_inst *inst)
 {
    int reg_size = dispatch_width / 8;
-   int write_len = inst->regs_written() * reg_size;
+   int write_len = inst->regs_written * reg_size;
    int first_write_grf = inst->dst.reg;
    bool needs_dep[BRW_MAX_MRF];
    assert(write_len < (int)sizeof(needs_dep) - 1);
@@ -2329,6 +2330,7 @@ fs_visitor::insert_gen4_pre_send_dependency_workarounds(fs_inst *inst)
                inst->insert_before(DEP_RESOLVE_MOV(first_write_grf + i));
             }
          }
+         return;
       }
 
       bool scan_inst_16wide = (dispatch_width > 8 &&
@@ -2340,7 +2342,7 @@ fs_visitor::insert_gen4_pre_send_dependency_workarounds(fs_inst *inst)
        * dependency has more latency than a MOV.
        */
       if (scan_inst->dst.file == GRF) {
-         for (int i = 0; i < scan_inst->regs_written(); i++) {
+         for (int i = 0; i < scan_inst->regs_written; i++) {
             int reg = scan_inst->dst.reg + i * reg_size;
 
             if (reg >= first_write_grf &&
@@ -2379,7 +2381,7 @@ fs_visitor::insert_gen4_pre_send_dependency_workarounds(fs_inst *inst)
 void
 fs_visitor::insert_gen4_post_send_dependency_workarounds(fs_inst *inst)
 {
-   int write_len = inst->regs_written() * dispatch_width / 8;
+   int write_len = inst->regs_written * dispatch_width / 8;
    int first_write_grf = inst->dst.reg;
    bool needs_dep[BRW_MAX_MRF];
    assert(write_len < (int)sizeof(needs_dep) - 1);
@@ -2398,6 +2400,7 @@ fs_visitor::insert_gen4_post_send_dependency_workarounds(fs_inst *inst)
             if (needs_dep[i])
                scan_inst->insert_before(DEP_RESOLVE_MOV(first_write_grf + i));
          }
+         return;
       }
 
       /* Clear the flag for registers that actually got read (as expected). */
@@ -2482,10 +2485,13 @@ fs_visitor::lower_uniform_pull_constant_loads()
          continue;
 
       if (intel->gen >= 7) {
+         /* The offset arg before was a vec4-aligned byte offset.  We need to
+          * turn it into a dword offset.
+          */
          fs_reg const_offset_reg = inst->src[1];
          assert(const_offset_reg.file == IMM &&
                 const_offset_reg.type == BRW_REGISTER_TYPE_UD);
-         const_offset_reg.imm.u /= 16;
+         const_offset_reg.imm.u /= 4;
          fs_reg payload = fs_reg(this, glsl_type::uint_type);
 
          /* This is actually going to be a MOV, but since only the first dword
@@ -2530,25 +2536,7 @@ fs_visitor::dump_instruction(fs_inst *inst)
              inst->flag_subreg);
    }
 
-   if (inst->opcode < ARRAY_SIZE(opcode_descs) &&
-       opcode_descs[inst->opcode].name) {
-      printf("%s", opcode_descs[inst->opcode].name);
-   } else {
-      switch (inst->opcode) {
-      case FS_OPCODE_UNIFORM_PULL_CONSTANT_LOAD:
-         printf("uniform_pull_const");
-         break;
-      case FS_OPCODE_UNIFORM_PULL_CONSTANT_LOAD_GEN7:
-         printf("uniform_pull_const_gen7");
-         break;
-      case FS_OPCODE_SET_SIMD4X2_OFFSET:
-         printf("set_global_offset");
-         break;
-      default:
-         printf("op%d", inst->opcode);
-         break;
-      }
-   }
+   printf("%s", brw_instruction_name(inst->opcode));
    if (inst->saturate)
       printf(".sat");
    if (inst->conditional_mod) {
@@ -2791,8 +2779,7 @@ fs_visitor::run()
       if (failed)
 	 return false;
 
-      if (INTEL_DEBUG & DEBUG_SHADER_TIME)
-         emit_shader_time_end();
+      emit(FS_OPCODE_PLACEHOLDER_HALT);
 
       emit_fb_writes();
 
@@ -2985,24 +2972,12 @@ brw_fs_precompile(struct gl_context *ctx, struct gl_shader_program *prog)
       key.iz_lookup |= IZ_DEPTH_WRITE_ENABLE_BIT;
    }
 
-   if (prog->Name != 0)
-      key.proj_attrib_mask = ~(GLbitfield64) 0;
-   else {
-      /* Bit VARYING_BIT_POS of key.proj_attrib_mask is never used, so to
-       * avoid unnecessary recompiles, always set it to 1.
-       */
-      key.proj_attrib_mask |= VARYING_BIT_POS;
-   }
-
    if (intel->gen < 6)
       key.input_slots_valid |= BITFIELD64_BIT(VARYING_SLOT_POS);
 
    for (int i = 0; i < VARYING_SLOT_MAX; i++) {
       if (!(fp->Base.InputsRead & BITFIELD64_BIT(i)))
 	 continue;
-
-      if (prog->Name == 0)
-         key.proj_attrib_mask |= BITFIELD64_BIT(i);
 
       if (intel->gen < 6) {
          if (_mesa_varying_slot_in_fs((gl_varying_slot) i))

@@ -149,6 +149,8 @@ The integer capabilities:
   to use a blit to implement a texture transfer which needs format conversions
   and swizzling in state trackers. Generally, all hardware drivers with
   dedicated memory should return 1 and all software rasterizers should return 0.
+* ``PIPE_CAP_QUERY_PIPELINE_STATISTICS``: Whether PIPE_QUERY_PIPELINE_STATISTICS
+  is supported.
 
 
 .. _pipe_capf:
@@ -234,10 +236,10 @@ PIPE_COMPUTE_CAP_*
 Compute-specific capabilities. They can be queried using
 pipe_screen::get_compute_param.
 
-* ``PIPE_COMPUTE_CAP_IR_TARGET``: A description of the target as a target
-  triple specification of the form ``processor-manufacturer-os`` that will
-  be passed on to the compiler.  This CAP is only relevant for drivers
-  that specify PIPE_SHADER_IR_LLVM for their preferred IR.
+* ``PIPE_COMPUTE_CAP_IR_TARGET``: A description of the target of the form
+  ``processor-arch-manufacturer-os`` that will be passed on to the compiler.
+  This CAP is only relevant for drivers that specify PIPE_SHADER_IR_LLVM for
+  their preferred IR.
   Value type: null-terminated string.
 * ``PIPE_COMPUTE_CAP_GRID_DIMENSION``: Number of supported dimensions
   for grid and block coordinates.  Value type: ``uint64_t``.
@@ -440,3 +442,15 @@ get_timestamp
 Query a timestamp in nanoseconds. The returned value should match
 PIPE_QUERY_TIMESTAMP. This function returns immediately and doesn't
 wait for rendering to complete (which cannot be achieved with queries).
+
+
+
+get_driver_query_info
+^^^^^^^^^^^^^^^^^^^^^
+
+Return a driver-specific query. If the **info** parameter is NULL,
+the number of available queries is returned.  Otherwise, the driver
+query at the specified **index** is returned in **info**.
+The function returns non-zero on success.
+The driver-specific query is described with the pipe_driver_query_info
+structure.

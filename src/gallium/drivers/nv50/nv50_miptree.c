@@ -147,6 +147,10 @@ nv50_miptree_destroy(struct pipe_screen *pscreen, struct pipe_resource *pt)
    nouveau_fence_ref(NULL, &mt->base.fence);
    nouveau_fence_ref(NULL, &mt->base.fence_wr);
 
+   NOUVEAU_DRV_STAT(nouveau_screen(pscreen), tex_obj_current_count, -1);
+   NOUVEAU_DRV_STAT(nouveau_screen(pscreen), tex_obj_current_bytes,
+                    -(uint64_t)mt->total_size);
+
    FREE(mt);
 }
 
@@ -209,10 +213,11 @@ nv50_miptree_init_ms_mode(struct nv50_miptree *mt)
 }
 
 boolean
-nv50_miptree_init_layout_linear(struct nv50_miptree *mt)
+nv50_miptree_init_layout_linear(struct nv50_miptree *mt, unsigned pitch_align)
 {
    struct pipe_resource *pt = &mt->base.base;
    const unsigned blocksize = util_format_get_blocksize(pt->format);
+   unsigned h = pt->height0;
 
    if (util_format_is_depth_or_stencil(pt->format))
       return FALSE;
@@ -222,9 +227,13 @@ nv50_miptree_init_layout_linear(struct nv50_miptree *mt)
    if (mt->ms_x | mt->ms_y)
       return FALSE;
 
-   mt->level[0].pitch = align(pt->width0 * blocksize, 64);
+   mt->level[0].pitch = align(pt->width0 * blocksize, pitch_align);
 
-   mt->total_size = mt->level[0].pitch * pt->height0;
+   /* Account for very generous prefetch (allocate size as if tiled). */
+   h = MAX2(h, 8);
+   h = util_next_power_of_two(h);
+
+   mt->total_size = mt->level[0].pitch * h;
 
    return TRUE;
 }
@@ -305,7 +314,7 @@ nv50_miptree_create(struct pipe_screen *pscreen,
    if (bo_config.nv50.memtype != 0) {
       nv50_miptree_init_layout_tiled(mt);
    } else
-   if (!nv50_miptree_init_layout_linear(mt)) {
+   if (!nv50_miptree_init_layout_linear(mt, 64)) {
       FREE(mt);
       return NULL;
    }

@@ -199,6 +199,7 @@ fd_screen_get_param(struct pipe_screen *pscreen, enum pipe_cap param)
 	case PIPE_CAP_VERTEX_COLOR_CLAMPED:
 	case PIPE_CAP_USER_VERTEX_BUFFERS:
 	case PIPE_CAP_USER_INDEX_BUFFERS:
+	case PIPE_CAP_QUERY_PIPELINE_STATISTICS:
 		return 0;
 
 	/* Stream output. */
@@ -419,6 +420,11 @@ fd_screen_bo_from_handle(struct pipe_screen *pscreen,
 {
 	struct fd_screen *screen = fd_screen(pscreen);
 	struct fd_bo *bo;
+
+	if (whandle->type != DRM_API_HANDLE_TYPE_SHARED) {
+		DBG("Attempt to import unsupported handle type %d", whandle->type);
+		return NULL;
+	}
 
 	bo = fd_bo_from_name(screen->dev, whandle->handle);
 	if (!bo) {

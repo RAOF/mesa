@@ -41,8 +41,6 @@ nvc0_mt_choose_storage_type(struct nv50_miptree *mt, boolean compressed)
 
    uint32_t tile_flags;
 
-   compressed = FALSE; /* not yet supported */
-
    if (unlikely(mt->base.base.bind & PIPE_BIND_CURSOR))
       return 0;
    if (unlikely(mt->base.base.flags & NOUVEAU_RESOURCE_FLAG_LINEAR))
@@ -84,7 +82,7 @@ nvc0_mt_choose_storage_type(struct nv50_miptree *mt, boolean compressed)
       switch (util_format_get_blocksizebits(mt->base.base.format)) {
       case 128:
          if (compressed)
-            tile_flags = 0xf4 + ms;
+            tile_flags = 0xf4 + ms * 2;
          else
             tile_flags = 0xfe;
          break;
@@ -103,9 +101,11 @@ nvc0_mt_choose_storage_type(struct nv50_miptree *mt, boolean compressed)
          }
          break;
       case 32:
-         if (compressed) {
+         if (compressed && ms) {
             switch (ms) {
+               /* This one makes things blurry:
             case 0: tile_flags = 0xdb; break;
+               */
             case 1: tile_flags = 0xdd; break;
             case 2: tile_flags = 0xdf; break;
             case 3: tile_flags = 0xe4; break;
@@ -157,9 +157,6 @@ nvc0_miptree_init_ms_mode(struct nv50_miptree *mt)
    }
    return TRUE;
 }
-
-boolean
-nv50_miptree_init_layout_linear(struct nv50_miptree *);
 
 static void
 nvc0_miptree_init_layout_video(struct nv50_miptree *mt)
@@ -247,6 +244,7 @@ nvc0_miptree_create(struct pipe_screen *pscreen,
    struct nouveau_device *dev = nouveau_screen(pscreen)->device;
    struct nv50_miptree *mt = CALLOC_STRUCT(nv50_miptree);
    struct pipe_resource *pt = &mt->base.base;
+   boolean compressed = dev->drm_version >= 0x01000101;
    int ret;
    union nouveau_bo_config bo_config;
    uint32_t bo_flags;
@@ -259,7 +257,22 @@ nvc0_miptree_create(struct pipe_screen *pscreen,
    pipe_reference_init(&pt->reference, 1);
    pt->screen = pscreen;
 
-   bo_config.nvc0.memtype = nvc0_mt_choose_storage_type(mt, TRUE);
+   if (pt->usage == PIPE_USAGE_STAGING) {
+      switch (pt->target) {
+      case PIPE_TEXTURE_1D:
+      case PIPE_TEXTURE_2D:
+      case PIPE_TEXTURE_RECT:
+         if (pt->last_level == 0 &&
+             !util_format_is_depth_or_stencil(pt->format) &&
+             pt->nr_samples <= 1)
+            pt->flags |= NOUVEAU_RESOURCE_FLAG_LINEAR;
+         break;
+      default:
+         break;
+      }
+   }
+
+   bo_config.nvc0.memtype = nvc0_mt_choose_storage_type(mt, compressed);
 
    if (!nvc0_miptree_init_ms_mode(mt)) {
       FREE(mt);
@@ -272,13 +285,16 @@ nvc0_miptree_create(struct pipe_screen *pscreen,
    if (likely(bo_config.nvc0.memtype)) {
       nvc0_miptree_init_layout_tiled(mt);
    } else
-   if (!nv50_miptree_init_layout_linear(mt)) {
+   if (!nv50_miptree_init_layout_linear(mt, 128)) {
       FREE(mt);
       return NULL;
    }
    bo_config.nvc0.tile_mode = mt->level[0].tile_mode;
 
-   mt->base.domain = NOUVEAU_BO_VRAM;
+   if (!bo_config.nvc0.memtype && pt->usage == PIPE_USAGE_STAGING)
+      mt->base.domain = NOUVEAU_BO_GART;
+   else
+      mt->base.domain = NOUVEAU_BO_VRAM;
 
    bo_flags = mt->base.domain | NOUVEAU_BO_NOSNOOP;
 
@@ -292,6 +308,10 @@ nvc0_miptree_create(struct pipe_screen *pscreen,
       return NULL;
    }
    mt->base.address = mt->base.bo->offset;
+
+   NOUVEAU_DRV_STAT(nouveau_screen(pscreen), tex_obj_current_count, 1);
+   NOUVEAU_DRV_STAT(nouveau_screen(pscreen), tex_obj_current_bytes,
+                    mt->total_size);
 
    return pt;
 }

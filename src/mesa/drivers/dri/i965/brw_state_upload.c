@@ -38,7 +38,6 @@
 
 static const struct brw_tracked_state *gen4_atoms[] =
 {
-   &brw_wm_input_sizes,
    &brw_vs_prog, /* must do before GS prog, state base address. */
    &brw_gs_prog, /* must do before state base address */
    &brw_clip_prog, /* must do before state base address */
@@ -103,7 +102,6 @@ static const struct brw_tracked_state *gen4_atoms[] =
 
 static const struct brw_tracked_state *gen6_atoms[] =
 {
-   &brw_wm_input_sizes,
    &brw_vs_prog, /* must do before state base address */
    &brw_gs_prog, /* must do before state base address */
    &brw_wm_prog, /* must do before state base address */
@@ -175,7 +173,6 @@ static const struct brw_tracked_state *gen6_atoms[] =
 
 static const struct brw_tracked_state *gen7_atoms[] =
 {
-   &brw_wm_input_sizes,
    &brw_vs_prog,
    &brw_wm_prog,
 
@@ -362,7 +359,6 @@ static struct dirty_bit_map brw_bits[] = {
    DEFINE_BIT(BRW_NEW_REDUCED_PRIMITIVE),
    DEFINE_BIT(BRW_NEW_PRIMITIVE),
    DEFINE_BIT(BRW_NEW_CONTEXT),
-   DEFINE_BIT(BRW_NEW_WM_INPUT_DIMENSIONS),
    DEFINE_BIT(BRW_NEW_PSP),
    DEFINE_BIT(BRW_NEW_SURFACES),
    DEFINE_BIT(BRW_NEW_VS_BINDING_TABLE),

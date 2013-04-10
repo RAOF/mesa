@@ -435,7 +435,8 @@ dri_flush(__DRIcontext *cPriv,
    }
 
    /* Flush the drawable. */
-   if (flags & __DRI2_FLUSH_DRAWABLE) {
+   if ((flags & __DRI2_FLUSH_DRAWABLE) &&
+       drawable->textures[ST_ATTACHMENT_BACK_LEFT]) {
       /* Resolve MSAA buffers. */
       if (drawable->stvis.samples > 1) {
          dri_msaa_resolve(ctx, drawable, ST_ATTACHMENT_BACK_LEFT);
@@ -443,6 +444,10 @@ dri_flush(__DRIcontext *cPriv,
       }
 
       dri_postprocessing(ctx, drawable, ST_ATTACHMENT_BACK_LEFT);
+
+      if (ctx->hud) {
+         hud_draw(ctx->hud, drawable->textures[ST_ATTACHMENT_BACK_LEFT]);
+      }
    }
 
    flush_flags = 0;

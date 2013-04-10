@@ -172,6 +172,7 @@ public:
 
    bool saturate;
    bool force_writemask_all;
+   bool no_dd_clear, no_dd_check;
 
    int conditional_mod; /**< BRW_CONDITIONAL_* */
 
@@ -194,6 +195,7 @@ public:
 
    bool is_tex();
    bool is_math();
+   bool is_send_from_grf();
    bool can_reswizzle_dst(int dst_writemask, int swizzle, int swizzle_mask);
    void reswizzle_dst(int dst_writemask, int swizzle);
 };
@@ -224,7 +226,7 @@ public:
       return dst_reg(retype(brw_null_reg(), BRW_REGISTER_TYPE_D));
    }
 
-   const struct gl_vertex_program *vp;
+   struct gl_vertex_program *vp;
    struct brw_vs_compile *c;
    struct brw_vs_prog_data *prog_data;
    unsigned int sanity_param_count;
@@ -336,6 +338,9 @@ public:
    bool opt_copy_propagation();
    bool opt_algebraic();
    bool opt_register_coalesce();
+   void opt_set_dependency_control();
+
+   bool can_do_source_mods(vec4_instruction *inst);
 
    vec4_instruction *emit(vec4_instruction *inst);
 
@@ -388,6 +393,10 @@ public:
 			       src_reg src,
 			       vec4_instruction *pre_rhs_inst,
 			       vec4_instruction *last_rhs_inst);
+
+   bool try_copy_propagation(struct intel_context *intel,
+                             vec4_instruction *inst, int arg,
+                             src_reg *values[4]);
 
    /** Walks an exec_list of ir_instruction and sends it through this visitor. */
    void visit_instructions(const exec_list *list);

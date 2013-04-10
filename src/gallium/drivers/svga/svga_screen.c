@@ -262,6 +262,7 @@ svga_get_param(struct pipe_screen *screen, enum pipe_cap param)
    case PIPE_CAP_CUBE_MAP_ARRAY:
    case PIPE_CAP_TEXTURE_BUFFER_OBJECTS:
    case PIPE_CAP_TEXTURE_BUFFER_OFFSET_ALIGNMENT:
+   case PIPE_CAP_QUERY_PIPELINE_STATISTICS:
       return 0;
    case PIPE_CAP_VERTEX_ELEMENT_SRC_OFFSET_4BYTE_ALIGNED_ONLY:
       return 1;
@@ -491,6 +492,28 @@ svga_fence_finish(struct pipe_screen *screen,
 }
 
 
+static int
+svga_get_driver_query_info(struct pipe_screen *screen,
+                           unsigned index,
+                           struct pipe_driver_query_info *info)
+{
+   static const struct pipe_driver_query_info queries[] = {
+      {"draw-calls", SVGA_QUERY_DRAW_CALLS, 0, FALSE},
+      {"fallbacks", SVGA_QUERY_FALLBACKS, 0, FALSE},
+      {"memory-used", SVGA_QUERY_MEMORY_USED, 0, TRUE}
+   };
+
+   if (!info)
+      return Elements(queries);
+
+   if (index >= Elements(queries))
+      return 0;
+
+   *info = queries[index];
+   return 1;
+}
+
+
 static void
 svga_destroy_screen( struct pipe_screen *screen )
 {
@@ -550,6 +573,7 @@ svga_screen_create(struct svga_winsys_screen *sws)
    screen->fence_reference = svga_fence_reference;
    screen->fence_signalled = svga_fence_signalled;
    screen->fence_finish = svga_fence_finish;
+   screen->get_driver_query_info = svga_get_driver_query_info;
    svgascreen->sws = sws;
 
    svga_init_screen_resource_functions(svgascreen);

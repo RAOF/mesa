@@ -36,7 +36,7 @@
  *
  * The basic model of the list scheduler is to take a basic block,
  * compute a DAG of the dependencies (RAW ordering with latency, WAW
- * ordering, WAR ordering), and make a list of the DAG heads.
+ * ordering with latency, WAR ordering), and make a list of the DAG heads.
  * Heuristically pick a DAG head, then put all the children that are
  * now DAG heads into the list of things to schedule.
  *
@@ -57,7 +57,7 @@ static bool debug = false;
 class schedule_node : public exec_node
 {
 public:
-   schedule_node(fs_inst *inst, int gen)
+   schedule_node(fs_inst *inst, const struct intel_context *intel)
    {
       this->inst = inst;
       this->child_array_size = 0;
@@ -67,14 +67,17 @@ public:
       this->parent_count = 0;
       this->unblocked_time = 0;
 
-      if (gen >= 7)
-         set_latency_gen7();
+      /* We can't measure Gen6 timings directly but expect them to be much
+       * closer to Gen7 than Gen4.
+       */
+      if (intel->gen >= 6)
+         set_latency_gen7(intel->is_haswell);
       else
          set_latency_gen4();
    }
 
    void set_latency_gen4();
-   void set_latency_gen7();
+   void set_latency_gen7(bool is_haswell);
 
    fs_inst *inst;
    schedule_node **children;
@@ -125,19 +128,59 @@ schedule_node::set_latency_gen4()
 }
 
 void
-schedule_node::set_latency_gen7()
+schedule_node::set_latency_gen7(bool is_haswell)
 {
    switch (inst->opcode) {
    case BRW_OPCODE_MAD:
-      /* 3 cycles (this is said to be 4 cycles sometimes depending on the
-       * register numbers in the sources):
+      /* 2 cycles
+       *  (since the last two src operands are in different register banks):
+       * mad(8) g4<1>F g2.2<4,1,1>F.x  g2<4,1,1>F.x g3.1<4,1,1>F.x { align16 WE_normal 1Q };
+       *
+       * 3 cycles on IVB, 4 on HSW
+       *  (since the last two src operands are in the same register bank):
        * mad(8) g4<1>F g2.2<4,1,1>F.x  g2<4,1,1>F.x g2.1<4,1,1>F.x { align16 WE_normal 1Q };
        *
-       * 20 cycles:
+       * 18 cycles on IVB, 16 on HSW
+       *  (since the last two src operands are in different register banks):
+       * mad(8) g4<1>F g2.2<4,1,1>F.x  g2<4,1,1>F.x g3.1<4,1,1>F.x { align16 WE_normal 1Q };
+       * mov(8) null   g4<4,5,1>F                     { align16 WE_normal 1Q };
+       *
+       * 20 cycles on IVB, 18 on HSW
+       *  (since the last two src operands are in the same register bank):
        * mad(8) g4<1>F g2.2<4,1,1>F.x  g2<4,1,1>F.x g2.1<4,1,1>F.x { align16 WE_normal 1Q };
        * mov(8) null   g4<4,4,1>F                     { align16 WE_normal 1Q };
        */
-      latency = 17;
+
+      /* Our register allocator doesn't know about register banks, so use the
+       * higher latency.
+       */
+      latency = is_haswell ? 16 : 18;
+      break;
+
+   case BRW_OPCODE_LRP:
+      /* 2 cycles
+       *  (since the last two src operands are in different register banks):
+       * lrp(8) g4<1>F g2.2<4,1,1>F.x  g2<4,1,1>F.x g3.1<4,1,1>F.x { align16 WE_normal 1Q };
+       *
+       * 3 cycles on IVB, 4 on HSW
+       *  (since the last two src operands are in the same register bank):
+       * lrp(8) g4<1>F g2.2<4,1,1>F.x  g2<4,1,1>F.x g2.1<4,1,1>F.x { align16 WE_normal 1Q };
+       *
+       * 16 cycles on IVB, 14 on HSW
+       *  (since the last two src operands are in different register banks):
+       * lrp(8) g4<1>F g2.2<4,1,1>F.x  g2<4,1,1>F.x g3.1<4,1,1>F.x { align16 WE_normal 1Q };
+       * mov(8) null   g4<4,4,1>F                     { align16 WE_normal 1Q };
+       *
+       * 16 cycles
+       *  (since the last two src operands are in the same register bank):
+       * lrp(8) g4<1>F g2.2<4,1,1>F.x  g2<4,1,1>F.x g2.1<4,1,1>F.x { align16 WE_normal 1Q };
+       * mov(8) null   g4<4,4,1>F                     { align16 WE_normal 1Q };
+       */
+
+      /* Our register allocator doesn't know about register banks, so use the
+       * higher latency.
+       */
+      latency = 14;
       break;
 
    case SHADER_OPCODE_RCP:
@@ -156,7 +199,7 @@ schedule_node::set_latency_gen7()
        *
        * Same for exp2, log2, rsq, sqrt, sin, cos.
        */
-      latency = 16;
+      latency = is_haswell ? 14 : 16;
       break;
 
    case SHADER_OPCODE_POW:
@@ -167,7 +210,7 @@ schedule_node::set_latency_gen7()
        * math pow(8) g4<1>F g2<0,1,0>F   g2.1<0,1,0>F  { align1 WE_normal 1Q };
        * mov(8)      null   g4<8,8,1>F                 { align1 WE_normal 1Q };
        */
-      latency = 24;
+      latency = is_haswell ? 22 : 24;
       break;
 
    case SHADER_OPCODE_TEX:
@@ -335,7 +378,7 @@ public:
 void
 instruction_scheduler::add_inst(fs_inst *inst)
 {
-   schedule_node *n = new(mem_ctx) schedule_node(inst, v->intel->gen);
+   schedule_node *n = new(mem_ctx) schedule_node(inst, v->intel);
 
    assert(!inst->is_head_sentinel());
    assert(!inst->is_tail_sentinel());
@@ -469,6 +512,9 @@ instruction_scheduler::calculate_deps()
       schedule_node *n = (schedule_node *)node;
       fs_inst *inst = n->inst;
 
+      if (inst->opcode == FS_OPCODE_PLACEHOLDER_HALT)
+         add_barrier_deps(n);
+
       /* read-after-write deps. */
       for (int i = 0; i < 3; i++) {
 	 if (inst->src[i].file == GRF) {
@@ -510,7 +556,7 @@ instruction_scheduler::calculate_deps()
       /* write-after-write deps. */
       if (inst->dst.file == GRF) {
          if (post_reg_alloc) {
-            for (int r = 0; r < inst->regs_written() * reg_width; r++) {
+            for (int r = 0; r < inst->regs_written * reg_width; r++) {
                add_dep(last_grf_write[inst->dst.reg + r], n);
                last_grf_write[inst->dst.reg + r] = n;
             }
@@ -617,7 +663,7 @@ instruction_scheduler::calculate_deps()
        */
       if (inst->dst.file == GRF) {
          if (post_reg_alloc) {
-            for (int r = 0; r < inst->regs_written() * reg_width; r++)
+            for (int r = 0; r < inst->regs_written * reg_width; r++)
                last_grf_write[inst->dst.reg + r] = n;
          } else {
             last_grf_write[inst->dst.reg] = n;
@@ -716,7 +762,7 @@ instruction_scheduler::schedule_instructions(fs_inst *next_block_header)
             schedule_node *n = (schedule_node *)node;
 
             chosen = n;
-            if (chosen->inst->regs_written() <= 1)
+            if (chosen->inst->regs_written <= 1)
                break;
          }
 
@@ -772,10 +818,10 @@ instruction_scheduler::schedule_instructions(fs_inst *next_block_header)
 	 }
       }
 
-      /* Shared resource: the mathbox.  There's one per EU (on later
-       * generations, it's even more limited pre-gen6), so if we send
-       * something off to it then the next math isn't going to make
-       * progress until the first is done.
+      /* Shared resource: the mathbox.  There's one mathbox per EU on Gen6+
+       * but it's more limited pre-gen6, so if we send something off to it then
+       * the next math instruction isn't going to make progress until the first
+       * is done.
        */
       if (chosen->inst->is_math()) {
 	 foreach_list(node, &instructions) {

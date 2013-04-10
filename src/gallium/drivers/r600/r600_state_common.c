@@ -926,7 +926,7 @@ static void r600_set_constant_buffer(struct pipe_context *ctx, uint shader, uint
 	/* Note that the state tracker can unbind constant buffers by
 	 * passing NULL here.
 	 */
-	if (unlikely(!input)) {
+	if (unlikely(!input || (!input->buffer && !input->user_buffer))) {
 		state->enabled_mask &= ~(1 << index);
 		state->dirty_mask &= ~(1 << index);
 		pipe_resource_reference(&state->cb[index].buffer, NULL);
@@ -1517,6 +1517,7 @@ static void r600_draw_vbo(struct pipe_context *ctx, const struct pipe_draw_info 
 	}
 
 	pipe_resource_reference(&ib.buffer, NULL);
+	rctx->num_draw_calls++;
 }
 
 void r600_draw_rectangle(struct blitter_context *blitter,

@@ -22,6 +22,7 @@
  */
 
 #include "brw_vec4.h"
+#include "brw_cfg.h"
 #include "glsl/ir_print_visitor.h"
 
 extern "C" {
@@ -218,6 +219,25 @@ vec4_instruction::is_math()
 	   opcode == SHADER_OPCODE_INT_REMAINDER ||
 	   opcode == SHADER_OPCODE_POW);
 }
+
+bool
+vec4_instruction::is_send_from_grf()
+{
+   return opcode == SHADER_OPCODE_SHADER_TIME_ADD;
+}
+
+bool
+vec4_visitor::can_do_source_mods(vec4_instruction *inst)
+{
+   if (intel->gen == 6 && inst->is_math())
+      return false;
+
+   if (inst->is_send_from_grf())
+      return false;
+
+   return true;
+}
+
 /**
  * Returns how many MRFs an opcode will write over.
  *
@@ -601,6 +621,112 @@ vec4_visitor::move_push_constants_to_pull_constants()
    pack_uniform_registers();
 }
 
+/**
+ * Sets the dependency control fields on instructions after register
+ * allocation and before the generator is run.
+ *
+ * When you have a sequence of instructions like:
+ *
+ * DP4 temp.x vertex uniform[0]
+ * DP4 temp.y vertex uniform[0]
+ * DP4 temp.z vertex uniform[0]
+ * DP4 temp.w vertex uniform[0]
+ *
+ * The hardware doesn't know that it can actually run the later instructions
+ * while the previous ones are in flight, producing stalls.  However, we have
+ * manual fields we can set in the instructions that let it do so.
+ */
+void
+vec4_visitor::opt_set_dependency_control()
+{
+   vec4_instruction *last_grf_write[BRW_MAX_GRF];
+   uint8_t grf_channels_written[BRW_MAX_GRF];
+   vec4_instruction *last_mrf_write[BRW_MAX_GRF];
+   uint8_t mrf_channels_written[BRW_MAX_GRF];
+
+   cfg_t cfg(this);
+
+   assert(prog_data->total_grf || !"Must be called after register allocation");
+
+   for (int i = 0; i < cfg.num_blocks; i++) {
+      bblock_t *bblock = cfg.blocks[i];
+      vec4_instruction *inst;
+
+      memset(last_grf_write, 0, sizeof(last_grf_write));
+      memset(last_mrf_write, 0, sizeof(last_mrf_write));
+
+      for (inst = (vec4_instruction *)bblock->start;
+           inst != (vec4_instruction *)bblock->end->next;
+           inst = (vec4_instruction *)inst->next) {
+         /* If we read from a register that we were doing dependency control
+          * on, don't do dependency control across the read.
+          */
+         for (int i = 0; i < 3; i++) {
+            int reg = inst->src[i].reg + inst->src[i].reg_offset;
+            if (inst->src[i].file == GRF) {
+               last_grf_write[reg] = NULL;
+            } else if (inst->src[i].file == HW_REG) {
+               memset(last_grf_write, 0, sizeof(last_grf_write));
+               break;
+            }
+            assert(inst->src[i].file != MRF);
+         }
+
+         /* In the presence of send messages, totally interrupt dependency
+          * control.  They're long enough that the chance of dependency
+          * control around them just doesn't matter.
+          */
+         if (inst->mlen) {
+            memset(last_grf_write, 0, sizeof(last_grf_write));
+            memset(last_mrf_write, 0, sizeof(last_mrf_write));
+            continue;
+         }
+
+         /* It looks like setting dependency control on a predicated
+          * instruction hangs the GPU.
+          */
+         if (inst->predicate) {
+            memset(last_grf_write, 0, sizeof(last_grf_write));
+            memset(last_mrf_write, 0, sizeof(last_mrf_write));
+            continue;
+         }
+
+         /* Now, see if we can do dependency control for this instruction
+          * against a previous one writing to its destination.
+          */
+         int reg = inst->dst.reg + inst->dst.reg_offset;
+         if (inst->dst.file == GRF) {
+            if (last_grf_write[reg] &&
+                !(inst->dst.writemask & grf_channels_written[reg])) {
+               last_grf_write[reg]->no_dd_clear = true;
+               inst->no_dd_check = true;
+            } else {
+               grf_channels_written[reg] = 0;
+            }
+
+            last_grf_write[reg] = inst;
+            grf_channels_written[reg] |= inst->dst.writemask;
+         } else if (inst->dst.file == MRF) {
+            if (last_mrf_write[reg] &&
+                !(inst->dst.writemask & mrf_channels_written[reg])) {
+               last_mrf_write[reg]->no_dd_clear = true;
+               inst->no_dd_check = true;
+            } else {
+               mrf_channels_written[reg] = 0;
+            }
+
+            last_mrf_write[reg] = inst;
+            mrf_channels_written[reg] |= inst->dst.writemask;
+         } else if (inst->dst.reg == HW_REG) {
+            if (inst->dst.fixed_hw_reg.file == BRW_GENERAL_REGISTER_FILE)
+               memset(last_grf_write, 0, sizeof(last_grf_write));
+            if (inst->dst.fixed_hw_reg.file == BRW_MESSAGE_REGISTER_FILE)
+               memset(last_mrf_write, 0, sizeof(last_mrf_write));
+         }
+      }
+   }
+}
+
 bool
 vec4_instruction::can_reswizzle_dst(int dst_writemask,
                                     int swizzle,
@@ -878,27 +1004,46 @@ vec4_visitor::opt_register_coalesce()
  *
  * We initially create large virtual GRFs for temporary structures, arrays,
  * and matrices, so that the dereference visitor functions can add reg_offsets
- * to work their way down to the actual member being accessed.
+ * to work their way down to the actual member being accessed.  But when it
+ * comes to optimization, we'd like to treat each register as individual
+ * storage if possible.
  *
- * Unlike in the FS visitor, though, we have no SEND messages that return more
- * than 1 register.  We also don't do any array access in register space,
- * which would have required contiguous physical registers.  Thus, all those
- * large virtual GRFs can be split up into independent single-register virtual
- * GRFs, making allocation and optimization easier.
+ * So far, the only thing that might prevent splitting is a send message from
+ * a GRF on IVB.
  */
 void
 vec4_visitor::split_virtual_grfs()
 {
    int num_vars = this->virtual_grf_count;
    int new_virtual_grf[num_vars];
+   bool split_grf[num_vars];
 
    memset(new_virtual_grf, 0, sizeof(new_virtual_grf));
+
+   /* Try to split anything > 0 sized. */
+   for (int i = 0; i < num_vars; i++) {
+      split_grf[i] = this->virtual_grf_sizes[i] != 1;
+   }
+
+   /* Check that the instructions are compatible with the registers we're trying
+    * to split.
+    */
+   foreach_list(node, &this->instructions) {
+      vec4_instruction *inst = (vec4_instruction *)node;
+
+      /* If there's a SEND message loading from a GRF on gen7+, it needs to be
+       * contiguous.  Assume that the GRF for the SEND is always in src[0].
+       */
+      if (inst->is_send_from_grf()) {
+         split_grf[inst->src[0].reg] = false;
+      }
+   }
 
    /* Allocate new space for split regs.  Note that the virtual
     * numbers will be contiguous.
     */
    for (int i = 0; i < num_vars; i++) {
-      if (this->virtual_grf_sizes[i] == 1)
+      if (!split_grf[i])
          continue;
 
       new_virtual_grf[i] = virtual_grf_alloc(1);
@@ -913,21 +1058,19 @@ vec4_visitor::split_virtual_grfs()
    foreach_list(node, &this->instructions) {
       vec4_instruction *inst = (vec4_instruction *)node;
 
-      if (inst->dst.file == GRF &&
-	  new_virtual_grf[inst->dst.reg] &&
-	  inst->dst.reg_offset != 0) {
-	 inst->dst.reg = (new_virtual_grf[inst->dst.reg] +
-			  inst->dst.reg_offset - 1);
-	 inst->dst.reg_offset = 0;
+      if (inst->dst.file == GRF && split_grf[inst->dst.reg] &&
+          inst->dst.reg_offset != 0) {
+         inst->dst.reg = (new_virtual_grf[inst->dst.reg] +
+                          inst->dst.reg_offset - 1);
+         inst->dst.reg_offset = 0;
       }
       for (int i = 0; i < 3; i++) {
-	 if (inst->src[i].file == GRF &&
-	     new_virtual_grf[inst->src[i].reg] &&
-	     inst->src[i].reg_offset != 0) {
-	    inst->src[i].reg = (new_virtual_grf[inst->src[i].reg] +
-				inst->src[i].reg_offset - 1);
-	    inst->src[i].reg_offset = 0;
-	 }
+         if (inst->src[i].file == GRF && split_grf[inst->src[i].reg] &&
+             inst->src[i].reg_offset != 0) {
+            inst->src[i].reg = (new_virtual_grf[inst->src[i].reg] +
+                                inst->src[i].reg_offset - 1);
+            inst->src[i].reg_offset = 0;
+         }
       }
    }
    this->live_intervals_valid = false;
@@ -936,12 +1079,7 @@ vec4_visitor::split_virtual_grfs()
 void
 vec4_visitor::dump_instruction(vec4_instruction *inst)
 {
-   if (inst->opcode < ARRAY_SIZE(opcode_descs) &&
-       opcode_descs[inst->opcode].name) {
-      printf("%s ", opcode_descs[inst->opcode].name);
-   } else {
-      printf("op%d ", inst->opcode);
-   }
+   printf("%s ", brw_instruction_name(inst->opcode));
 
    switch (inst->dst.file) {
    case GRF:
@@ -1225,32 +1363,23 @@ void
 vec4_visitor::emit_shader_time_write(enum shader_time_shader_type type,
                                      src_reg value)
 {
-   /* Choose an index in the buffer and set up tracking information for our
-    * printouts.
-    */
-   int shader_time_index = brw->shader_time.num_entries++;
-   assert(shader_time_index <= brw->shader_time.max_entries);
-   brw->shader_time.types[shader_time_index] = type;
-   if (prog) {
-      _mesa_reference_shader_program(ctx,
-                                     &brw->shader_time.programs[shader_time_index],
-                                     prog);
-   }
+   int shader_time_index = brw_get_shader_time_index(brw, prog, &vp->Base,
+                                                     type);
 
-   int base_mrf = 6;
+   dst_reg dst =
+      dst_reg(this, glsl_type::get_array_instance(glsl_type::vec4_type, 2));
 
-   dst_reg offset_mrf = dst_reg(MRF, base_mrf);
-   offset_mrf.type = BRW_REGISTER_TYPE_UD;
-   emit(MOV(offset_mrf, src_reg(shader_time_index * SHADER_TIME_STRIDE)));
+   dst_reg offset = dst;
+   dst_reg time = dst;
+   time.reg_offset++;
 
-   dst_reg time_mrf = dst_reg(MRF, base_mrf + 1);
-   time_mrf.type = BRW_REGISTER_TYPE_UD;
-   emit(MOV(time_mrf, src_reg(value)));
+   offset.type = BRW_REGISTER_TYPE_UD;
+   emit(MOV(offset, src_reg(shader_time_index * SHADER_TIME_STRIDE)));
 
-   vec4_instruction *inst;
-   inst = emit(SHADER_OPCODE_SHADER_TIME_ADD);
-   inst->base_mrf = base_mrf;
-   inst->mlen = 2;
+   time.type = BRW_REGISTER_TYPE_UD;
+   emit(MOV(time, src_reg(value)));
+
+   emit(SHADER_OPCODE_SHADER_TIME_ADD, dst_reg(), src_reg(dst));
 }
 
 bool
@@ -1275,9 +1404,6 @@ vec4_visitor::run()
 
    if (c->key.userclip_active && !c->key.uses_clip_distance)
       setup_uniform_clipplane_values();
-
-   if (INTEL_DEBUG & DEBUG_SHADER_TIME)
-      emit_shader_time_end();
 
    emit_urb_writes();
 
@@ -1335,6 +1461,8 @@ vec4_visitor::run()
       if (failed)
          break;
    }
+
+   opt_set_dependency_control();
 
    /* If any state parameters were appended, then ParameterValues could have
     * been realloced, in which case the driver uniform storage set up by

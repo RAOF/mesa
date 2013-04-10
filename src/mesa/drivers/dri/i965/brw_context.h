@@ -137,7 +137,6 @@ enum brw_state_id {
    BRW_STATE_REDUCED_PRIMITIVE,
    BRW_STATE_PRIMITIVE,
    BRW_STATE_CONTEXT,
-   BRW_STATE_WM_INPUT_DIMENSIONS,
    BRW_STATE_PSP,
    BRW_STATE_SURFACES,
    BRW_STATE_VS_BINDING_TABLE,
@@ -164,7 +163,6 @@ enum brw_state_id {
 #define BRW_NEW_REDUCED_PRIMITIVE       (1 << BRW_STATE_REDUCED_PRIMITIVE)
 #define BRW_NEW_PRIMITIVE               (1 << BRW_STATE_PRIMITIVE)
 #define BRW_NEW_CONTEXT                 (1 << BRW_STATE_CONTEXT)
-#define BRW_NEW_WM_INPUT_DIMENSIONS     (1 << BRW_STATE_WM_INPUT_DIMENSIONS)
 #define BRW_NEW_PSP                     (1 << BRW_STATE_PSP)
 #define BRW_NEW_SURFACES		(1 << BRW_STATE_SURFACES)
 #define BRW_NEW_VS_BINDING_TABLE	(1 << BRW_STATE_VS_BINDING_TABLE)
@@ -859,15 +857,6 @@ struct brw_context
       GLuint nr_sf_entries;
       GLuint nr_cs_entries;
 
-      /* gen6:
-       * The length of each URB entry owned by the VS (or GS), as
-       * a number of 1024-bit (128-byte) rows.  Should be >= 1.
-       *
-       * gen7: Same meaning, but in 512-bit (64-byte) rows.
-       */
-      GLuint vs_size;
-      GLuint gs_size;
-
       GLuint vs_start;
       GLuint gs_start;
       GLuint clip_start;
@@ -1002,11 +991,6 @@ struct brw_context
    struct {
       struct brw_wm_prog_data *prog_data;
 
-      /** Input sizes, calculated from active vertex program.
-       * One bit per fragment program input attribute.
-       */
-      GLbitfield64 input_size_masks[4];
-
       /** offsets in the batch to sampler default colors (texture border color)
        */
       uint32_t sdc_offset[BRW_MAX_TEX_UNIT];
@@ -1123,7 +1107,8 @@ struct brw_context
 
    struct {
       drm_intel_bo *bo;
-      struct gl_shader_program **programs;
+      struct gl_shader_program **shader_programs;
+      struct gl_program **programs;
       enum shader_time_shader_type *types;
       uint64_t *cumulative;
       int num_entries;
@@ -1187,6 +1172,10 @@ int brw_get_scratch_size(int size);
 void brw_get_scratch_bo(struct intel_context *intel,
 			drm_intel_bo **scratch_bo, int size);
 void brw_init_shader_time(struct brw_context *brw);
+int brw_get_shader_time_index(struct brw_context *brw,
+                              struct gl_shader_program *shader_prog,
+                              struct gl_program *prog,
+                              enum shader_time_shader_type type);
 void brw_collect_and_report_shader_time(struct brw_context *brw);
 void brw_destroy_shader_time(struct brw_context *brw);
 
@@ -1346,6 +1335,29 @@ struct opcode_desc {
 };
 
 extern const struct opcode_desc opcode_descs[128];
+
+void
+brw_emit_depthbuffer(struct brw_context *brw);
+
+void
+brw_emit_depth_stencil_hiz(struct brw_context *brw,
+                           struct intel_mipmap_tree *depth_mt,
+                           uint32_t depth_offset, uint32_t depthbuffer_format,
+                           uint32_t depth_surface_type,
+                           struct intel_mipmap_tree *stencil_mt,
+                           struct intel_mipmap_tree *hiz_mt,
+                           bool separate_stencil, uint32_t width,
+                           uint32_t height, uint32_t tile_x, uint32_t tile_y);
+
+void
+gen7_emit_depth_stencil_hiz(struct brw_context *brw,
+                            struct intel_mipmap_tree *depth_mt,
+                            uint32_t depth_offset, uint32_t depthbuffer_format,
+                            uint32_t depth_surface_type,
+                            struct intel_mipmap_tree *stencil_mt,
+                            struct intel_mipmap_tree *hiz_mt,
+                            bool separate_stencil, uint32_t width,
+                            uint32_t height, uint32_t tile_x, uint32_t tile_y);
 
 #ifdef __cplusplus
 }

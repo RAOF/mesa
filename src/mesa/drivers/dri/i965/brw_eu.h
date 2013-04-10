@@ -305,7 +305,7 @@ void brw_oword_block_write_scratch(struct brw_compile *p,
 				   GLuint offset);
 
 void brw_shader_time_add(struct brw_compile *p,
-                         int mrf,
+                         struct brw_reg payload,
                          uint32_t surf_index);
 
 /* If/else/endif.  Works by manipulating the execution flags on each
@@ -398,11 +398,6 @@ bool brw_try_compact_instruction(struct brw_compile *p,
 void brw_debug_compact_uncompact(struct intel_context *intel,
 				 struct brw_instruction *orig,
 				 struct brw_instruction *uncompacted);
-
-/* brw_optimize.c */
-void brw_optimize(struct brw_compile *p);
-void brw_remove_duplicate_mrf_moves(struct brw_compile *p);
-void brw_remove_grf_to_mrf_moves(struct brw_compile *p);
 
 #ifdef __cplusplus
 }

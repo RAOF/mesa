@@ -261,7 +261,7 @@ fs_visitor::try_emit_saturate(ir_expression *ir)
     * src, generate a saturated MOV
     */
    fs_inst *modify = get_instruction_generating_reg(pre_inst, last_inst, src);
-   if (!modify || modify->regs_written() != 1) {
+   if (!modify || modify->regs_written != 1) {
       this->result = fs_reg(this, ir->type);
       fs_inst *inst = emit(MOV(this->result, src));
       inst->saturate = true;
@@ -650,9 +650,8 @@ fs_visitor::visit(ir_expression *ir)
          emit(SHR(base_offset, op[1], fs_reg(2)));
 
          for (int i = 0; i < ir->type->vector_elements; i++) {
-            fs_reg offset = fs_reg(this, glsl_type::int_type);
-            emit(ADD(offset, base_offset, fs_reg(i)));
-            emit(VARYING_PULL_CONSTANT_LOAD(result, surf_index, offset));
+            emit(VARYING_PULL_CONSTANT_LOAD(result, surf_index,
+                                            base_offset, i));
 
             if (ir->type->base_type == GLSL_TYPE_BOOL)
                emit(CMP(result, result, fs_reg(0), BRW_CONDITIONAL_NZ));
@@ -747,7 +746,7 @@ fs_visitor::try_rewrite_rhs_to_dst(ir_assignment *ir,
    /* If last_rhs_inst wrote a different number of components than our LHS,
     * we can't safely rewrite it.
     */
-   if (virtual_grf_sizes[dst.reg] != modify->regs_written())
+   if (virtual_grf_sizes[dst.reg] != modify->regs_written)
       return false;
 
    /* Success!  Rewrite the instruction. */
@@ -917,11 +916,10 @@ fs_visitor::emit_texture_gen4(ir_texture *ir, fs_reg dst, fs_reg coordinate,
        * this weirdness around to the expected layout.
        */
       orig_dst = dst;
-      const glsl_type *vec_type =
-	 glsl_type::get_instance(ir->type->base_type, 4, 1);
-      dst = fs_reg(this, glsl_type::get_array_instance(vec_type, 2));
-      dst.type = intel->is_g4x ? brw_type_for_base_type(ir->type)
-			       : BRW_REGISTER_TYPE_F;
+      dst = fs_reg(GRF, virtual_grf_alloc(8),
+                   (intel->is_g4x ?
+                    brw_type_for_base_type(ir->type) :
+                    BRW_REGISTER_TYPE_F));
    }
 
    fs_inst *inst = NULL;
@@ -950,6 +948,7 @@ fs_visitor::emit_texture_gen4(ir_texture *ir, fs_reg dst, fs_reg coordinate,
    inst->base_mrf = base_mrf;
    inst->mlen = mlen;
    inst->header_present = true;
+   inst->regs_written = simd16 ? 8 : 4;
 
    if (simd16) {
       for (int i = 0; i < 4; i++) {
@@ -1084,10 +1083,14 @@ fs_visitor::emit_texture_gen5(ir_texture *ir, fs_reg dst, fs_reg coordinate,
       mlen += reg_width;
       inst = emit(SHADER_OPCODE_TXF_MS, dst);
       break;
+   case ir_lod:
+      inst = emit(SHADER_OPCODE_LOD, dst);
+      break;
    }
    inst->base_mrf = base_mrf;
    inst->mlen = mlen;
    inst->header_present = header_present;
+   inst->regs_written = 4;
 
    if (mlen > 11) {
       fail("Message length >11 disallowed by hardware\n");
@@ -1124,6 +1127,7 @@ fs_visitor::emit_texture_gen7(ir_texture *ir, fs_reg dst, fs_reg coordinate,
    /* Set up the LOD info */
    switch (ir->op) {
    case ir_tex:
+   case ir_lod:
       break;
    case ir_txb:
       emit(MOV(fs_reg(MRF, base_mrf + mlen), lod));
@@ -1237,10 +1241,12 @@ fs_visitor::emit_texture_gen7(ir_texture *ir, fs_reg dst, fs_reg coordinate,
    case ir_txf: inst = emit(SHADER_OPCODE_TXF, dst); break;
    case ir_txf_ms: inst = emit(SHADER_OPCODE_TXF_MS, dst); break;
    case ir_txs: inst = emit(SHADER_OPCODE_TXS, dst); break;
+   case ir_lod: inst = emit(SHADER_OPCODE_LOD, dst); break;
    }
    inst->base_mrf = base_mrf;
    inst->mlen = mlen;
    inst->header_present = header_present;
+   inst->regs_written = 4;
 
    if (mlen > 11) {
       fail("Message length >11 disallowed by hardware\n");
@@ -1388,6 +1394,7 @@ fs_visitor::visit(ir_texture *ir)
    fs_reg lod, lod2, sample_index;
    switch (ir->op) {
    case ir_tex:
+   case ir_lod:
       break;
    case ir_txb:
       ir->lod_info.bias->accept(this);
@@ -1462,7 +1469,7 @@ fs_visitor::swizzle_result(ir_texture *ir, fs_reg orig_val, int sampler)
 {
    this->result = orig_val;
 
-   if (ir->op == ir_txs)
+   if (ir->op == ir_txs || ir->op == ir_lod)
       return;
 
    if (ir->type == glsl_type::float_type) {
@@ -2263,6 +2270,9 @@ fs_visitor::emit_fb_writes()
 	 inst->saturate = c->key.clamp_fragment_color;
       }
 
+      if (INTEL_DEBUG & DEBUG_SHADER_TIME)
+         emit_shader_time_end();
+
       fs_inst *inst = emit(FS_OPCODE_FB_WRITE);
       inst->target = 0;
       inst->base_mrf = base_mrf;
@@ -2297,6 +2307,14 @@ fs_visitor::emit_fb_writes()
       for (unsigned i = 0; i < this->output_components[target]; i++)
          emit_color_write(target, i, write_color_mrf);
 
+      bool eot = false;
+      if (target == c->key.nr_color_regions - 1) {
+         eot = true;
+
+         if (INTEL_DEBUG & DEBUG_SHADER_TIME)
+            emit_shader_time_end();
+      }
+
       fs_inst *inst = emit(FS_OPCODE_FB_WRITE);
       inst->target = target;
       inst->base_mrf = base_mrf;
@@ -2304,8 +2322,7 @@ fs_visitor::emit_fb_writes()
          inst->mlen = nr - base_mrf - reg_width;
       else
          inst->mlen = nr - base_mrf;
-      if (target == c->key.nr_color_regions - 1)
-	 inst->eot = true;
+      inst->eot = eot;
       inst->header_present = header_present;
    }
 
@@ -2315,6 +2332,9 @@ fs_visitor::emit_fb_writes()
        * alpha-testing, alpha-to-coverage, and so on.
        */
       emit_color_write(0, 3, color_mrf);
+
+      if (INTEL_DEBUG & DEBUG_SHADER_TIME)
+         emit_shader_time_end();
 
       fs_inst *inst = emit(FS_OPCODE_FB_WRITE);
       inst->base_mrf = base_mrf;

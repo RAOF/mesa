@@ -47,6 +47,11 @@
 #define R600_BIG_ENDIAN 0
 #endif
 
+#define R600_TRACE_CS 0
+#define R600_TRACE_CS_DWORDS		6
+
+struct si_pipe_compute;
+
 struct r600_pipe_fences {
 	struct si_resource		*bo;
 	unsigned			*data;
@@ -67,6 +72,11 @@ struct r600_screen {
 	struct r600_tiling_info		tiling_info;
 	struct util_slab_mempool	pool_buffers;
 	struct r600_pipe_fences		fences;
+#if R600_TRACE_CS
+	struct si_resource		*trace_bo;
+	uint32_t			*trace_ptr;
+	unsigned			cs_count;
+#endif
 };
 
 struct si_pipe_sampler_view {
@@ -78,6 +88,10 @@ struct si_pipe_sampler_view {
 struct si_pipe_sampler_state {
 	uint32_t			val[4];
 	float				border_color[4];
+};
+
+struct si_cs_shader_state {
+	struct si_pipe_compute		*program;
 };
 
 /* needed for blitter save */
@@ -131,6 +145,7 @@ struct r600_context {
 	struct pipe_stencil_ref		stencil_ref;
 	struct si_pipe_shader_selector	*ps_shader;
 	struct si_pipe_shader_selector	*vs_shader;
+	struct si_cs_shader_state	cs_shader_state;
 	struct pipe_query		*current_render_cond;
 	unsigned			current_render_cond_mode;
 	struct pipe_query		*saved_render_cond;
@@ -210,6 +225,7 @@ void r600_upload_index_buffer(struct r600_context *rctx,
 /* r600_pipe.c */
 void radeonsi_flush(struct pipe_context *ctx, struct pipe_fence_handle **fence,
 		    unsigned flags);
+const char *r600_get_llvm_processor_name(enum radeon_family family);
 
 /* r600_query.c */
 void r600_init_query_functions(struct r600_context *rctx);
@@ -225,6 +241,13 @@ void si_init_surface_functions(struct r600_context *r600);
 void r600_translate_index_buffer(struct r600_context *r600,
 				 struct pipe_index_buffer *ib,
 				 unsigned count);
+
+#if R600_TRACE_CS
+void r600_trace_emit(struct r600_context *rctx);
+#endif
+
+/* radeonsi_compute.c */
+void si_init_compute_functions(struct r600_context *rctx);
 
 /*
  * common helpers

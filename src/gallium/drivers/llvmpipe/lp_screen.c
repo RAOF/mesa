@@ -130,6 +130,8 @@ llvmpipe_get_param(struct pipe_screen *screen, enum pipe_cap param)
       return 0;
    case PIPE_CAP_QUERY_TIMESTAMP:
       return 1;
+   case PIPE_CAP_QUERY_PIPELINE_STATISTICS:
+      return 0;
    case PIPE_CAP_TEXTURE_MIRROR_CLAMP:
       return 1;
    case PIPE_CAP_TEXTURE_SHADOW_MAP:
@@ -483,9 +485,10 @@ llvmpipe_create_screen(struct sw_winsys *winsys)
 {
    struct llvmpipe_screen *screen;
 
-#ifdef PIPE_ARCH_X86
-   /* require SSE2 due to LLVM PR6960. */
    util_cpu_detect();
+
+#if defined(PIPE_ARCH_X86) && HAVE_LLVM < 0x0302
+   /* require SSE2 due to LLVM PR6960. */
    if (!util_cpu_caps.has_sse2)
        return NULL;
 #endif

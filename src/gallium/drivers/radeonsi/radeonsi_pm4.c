@@ -47,8 +47,9 @@ void si_pm4_cmd_end(struct si_pm4_state *state, bool predicate)
 {
 	unsigned count;
 	count = state->ndw - state->last_pm4 - 2;
-	state->pm4[state->last_pm4] = PKT3(state->last_opcode,
-					   count, predicate);
+	state->pm4[state->last_pm4] =
+		PKT3(state->last_opcode, count, predicate)
+		   | PKT3_SHADER_TYPE_S(state->compute_pkt);
 
 	assert(state->ndw <= SI_PM4_MAX_DW);
 }
@@ -137,12 +138,7 @@ void si_pm4_inval_shader_cache(struct si_pm4_state *state)
 void si_pm4_inval_texture_cache(struct si_pm4_state *state)
 {
 	state->cp_coher_cntl |= S_0085F0_TC_ACTION_ENA(1);
-}
-
-void si_pm4_inval_vertex_cache(struct si_pm4_state *state)
-{
-        /* Some GPUs don't have the vertex cache and must use the texture cache instead. */
-	state->cp_coher_cntl |= S_0085F0_TC_ACTION_ENA(1);
+	state->cp_coher_cntl |= S_0085F0_TCL1_ACTION_ENA(1);
 }
 
 void si_pm4_inval_fb_cache(struct si_pm4_state *state, unsigned nr_cbufs)
@@ -199,6 +195,12 @@ unsigned si_pm4_dirty_dw(struct r600_context *rctx)
 			continue;
 
 		count += state->ndw;
+#if R600_TRACE_CS
+		/* for tracing each states */
+		if (rctx->screen->trace_bo) {
+			count += R600_TRACE_CS_DWORDS;
+		}
+#endif
 	}
 
 	return count;
@@ -219,6 +221,12 @@ void si_pm4_emit(struct r600_context *rctx, struct si_pm4_state *state)
 	}
 
 	cs->cdw += state->ndw;
+
+#if R600_TRACE_CS
+	if (rctx->screen->trace_bo) {
+		r600_trace_emit(rctx);
+	}
+#endif
 }
 
 void si_pm4_emit_dirty(struct r600_context *rctx)

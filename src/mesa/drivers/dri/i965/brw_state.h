@@ -72,7 +72,6 @@ extern const struct brw_tracked_state brw_vertex_state;
 extern const struct brw_tracked_state brw_vs_prog;
 extern const struct brw_tracked_state brw_vs_ubo_surfaces;
 extern const struct brw_tracked_state brw_vs_unit;
-extern const struct brw_tracked_state brw_wm_input_sizes;
 extern const struct brw_tracked_state brw_wm_prog;
 extern const struct brw_tracked_state brw_renderbuffer_surfaces;
 extern const struct brw_tracked_state brw_texture_surfaces;
@@ -187,11 +186,6 @@ void *brw_state_batch(struct brw_context *brw,
 void gen4_init_vtable_surface_functions(struct brw_context *brw);
 uint32_t brw_get_surface_tiling_bits(uint32_t tiling);
 uint32_t brw_get_surface_num_multisamples(unsigned num_samples);
-void brw_create_constant_surface(struct brw_context *brw,
-				 drm_intel_bo *bo,
-				 uint32_t offset,
-				 int width,
-				 uint32_t *out_offset);
 
 uint32_t brw_format_for_mesa_format(gl_format mesa_format);
 

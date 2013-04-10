@@ -602,6 +602,7 @@ static int r600_get_param(struct pipe_screen* pscreen, enum pipe_cap param)
 	case PIPE_CAP_VERTEX_COLOR_CLAMPED:
 	case PIPE_CAP_USER_VERTEX_BUFFERS:
 	case PIPE_CAP_TEXTURE_BUFFER_OFFSET_ALIGNMENT:
+	case PIPE_CAP_QUERY_PIPELINE_STATISTICS:
 		return 0;
 
 	/* Stream output. */
@@ -763,18 +764,84 @@ static int r600_get_video_param(struct pipe_screen *screen,
 	}
 }
 
+const char * r600_llvm_gpu_string(enum radeon_family family)
+{
+	const char * gpu_family;
+
+	switch (family) {
+	case CHIP_R600:
+	case CHIP_RV610:
+	case CHIP_RV630:
+	case CHIP_RV620:
+	case CHIP_RV635:
+	case CHIP_RV670:
+	case CHIP_RS780:
+	case CHIP_RS880:
+		gpu_family = "r600";
+		break;
+	case CHIP_RV710:
+		gpu_family = "rv710";
+		break;
+	case CHIP_RV730:
+		gpu_family = "rv730";
+		break;
+	case CHIP_RV740:
+	case CHIP_RV770:
+		gpu_family = "rv770";
+		break;
+	case CHIP_PALM:
+	case CHIP_CEDAR:
+		gpu_family = "cedar";
+		break;
+	case CHIP_SUMO:
+	case CHIP_SUMO2:
+	case CHIP_REDWOOD:
+		gpu_family = "redwood";
+		break;
+	case CHIP_JUNIPER:
+		gpu_family = "juniper";
+		break;
+	case CHIP_HEMLOCK:
+	case CHIP_CYPRESS:
+		gpu_family = "cypress";
+		break;
+	case CHIP_BARTS:
+		gpu_family = "barts";
+		break;
+	case CHIP_TURKS:
+		gpu_family = "turks";
+		break;
+	case CHIP_CAICOS:
+		gpu_family = "caicos";
+		break;
+	case CHIP_CAYMAN:
+        case CHIP_ARUBA:
+		gpu_family = "cayman";
+		break;
+	default:
+		gpu_family = "";
+		fprintf(stderr, "Chip not supported by r600 llvm "
+			"backend, please file a bug at " PACKAGE_BUGREPORT "\n");
+		break;
+	}
+	return gpu_family;
+}
+
+
 static int r600_get_compute_param(struct pipe_screen *screen,
         enum pipe_compute_cap param,
         void *ret)
 {
+	struct r600_screen *rscreen = (struct r600_screen *)screen;
 	//TODO: select these params by asic
 	switch (param) {
-	case PIPE_COMPUTE_CAP_IR_TARGET:
+	case PIPE_COMPUTE_CAP_IR_TARGET: {
+		const char *gpu = r600_llvm_gpu_string(rscreen->family);
 		if (ret) {
-			strcpy(ret, "r600--");
+			sprintf(ret, "%s-r600--", gpu);
 		}
-		return 7 * sizeof(char);
-
+		return (8 + strlen(gpu)) * sizeof(char);
+	}
 	case PIPE_COMPUTE_CAP_GRID_DIMENSION:
 		if (ret) {
 			uint64_t * grid_dimension = ret;
@@ -1077,6 +1144,27 @@ static uint64_t r600_get_timestamp(struct pipe_screen *screen)
 			rscreen->info.r600_clock_crystal_freq;
 }
 
+static int r600_get_driver_query_info(struct pipe_screen *screen,
+				      unsigned index,
+				      struct pipe_driver_query_info *info)
+{
+	struct r600_screen *rscreen = (struct r600_screen*)screen;
+	struct pipe_driver_query_info list[] = {
+		{"draw-calls", R600_QUERY_DRAW_CALLS, 0},
+		{"requested-VRAM", R600_QUERY_REQUESTED_VRAM, rscreen->info.vram_size, TRUE},
+		{"requested-GTT", R600_QUERY_REQUESTED_GTT, rscreen->info.gart_size, TRUE},
+	};
+
+	if (!info)
+		return Elements(list);
+
+	if (index >= Elements(list))
+		return 0;
+
+	*info = list[index];
+	return 1;
+}
+
 struct pipe_screen *r600_screen_create(struct radeon_winsys *ws)
 {
 	struct r600_screen *rscreen = CALLOC_STRUCT(r600_screen);
@@ -1183,6 +1271,7 @@ struct pipe_screen *r600_screen_create(struct radeon_winsys *ws)
 	rscreen->screen.fence_reference = r600_fence_reference;
 	rscreen->screen.fence_signalled = r600_fence_signalled;
 	rscreen->screen.fence_finish = r600_fence_finish;
+	rscreen->screen.get_driver_query_info = r600_get_driver_query_info;
 	r600_init_screen_resource_functions(&rscreen->screen);
 
 	util_format_s3tc_init();
