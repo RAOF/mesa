@@ -1,6 +1,6 @@
-mesa (9.2~git20130402.b2eee086-0ubuntu0+mir2) unstable; urgency=low
+mesa (9.2~git20130402.b2eee086-0ubuntu0+mir2) raring; urgency=low
 
-  * egl-platform-mir.patch: Add radeon support for dma-buf
+  * egl-platform-mir.patch: Add radeon & nouveau support for dma-buf
 
  -- Christopher James Halse Rogers <raof@ubuntu.com>  Wed, 10 Apr 2013 16:43:47 +1000
 
