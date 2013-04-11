@@ -76,7 +76,7 @@ else
 # only linux actually has KMS drivers implemented at this point.
 	EGL_DISPLAYS += drm
 # Non-Linux ports also lack *_CLOEXEC and epoll, so wayland isn't ready yet:
-	EGL_DISPLAYS += wayland
+#	EGL_DISPLAYS += wayland
         EGL_DISPLAYS += mir
     ifeq (,$(filter $(DEB_HOST_ARCH), s390 s390x))
 	DRI_DRIVERS += r200 radeon nouveau
@@ -282,7 +282,7 @@ binary-arch: install
 	dh_compress -s
 	dh_fixperms -s
 ifeq (,$(filter sparc sparc64,$(DEB_HOST_ARCH)))
-	dh_makeshlibs -s -- -c1
+	dh_makeshlibs -s -- -c0
 else
 	# Temporarily work around FTBFS on sparc, ignore new symbols:
 	dh_makeshlibs -s -- -c1

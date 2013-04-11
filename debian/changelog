@@ -1,3 +1,9 @@
+mesa (9.2~git20130402.b2eee086-0ubuntu0+mir3) quantal; urgency=low
+
+  * Pull Raring's mesa into Quantal for use-dma-buf support; disable Wayland backend
+
+ -- Christopher James Halse Rogers <raof@ubuntu.com>  Thu, 11 Apr 2013 15:59:34 +1000
+
 mesa (9.2~git20130402.b2eee086-0ubuntu0+mir2) raring; urgency=low
 
   * egl-platform-mir.patch: Add radeon & nouveau support for dma-buf
