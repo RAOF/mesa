@@ -60,7 +60,7 @@
 #include <sys/stat.h>
 #endif
 #ifdef HAVE_MIR_PLATFORM
-#include <mir_toolkit/mir_client_library.h>
+#include <mir_toolkit/mesa/native_display.h>
 #endif
 
 /**
@@ -158,7 +158,7 @@ _eglNativePlatformDetectNativeDisplay(EGLNativeDisplayType nativeDisplay)
 #endif
 
 #ifdef HAVE_MIR_PLATFORM
-   if (mir_egl_native_display_is_valid(nativeDisplay))
+   if (mir_egl_mesa_display_is_valid((MirMesaEGLNativeDisplay *)nativeDisplay))
       return _EGL_PLATFORM_MIR;
 #endif
 
@@ -196,7 +196,7 @@ _eglNativePlatformDetectNativeDisplay(EGLNativeDisplayType nativeDisplay)
 _EGLPlatformType
 _eglGetNativePlatform(EGLNativeDisplayType nativeDisplay)
 {
-   static _EGLPlatformType native_platform = _EGL_INVALID_PLATFORM;
+   _EGLPlatformType native_platform = _EGL_INVALID_PLATFORM;
    char *detection_method = NULL;
 
    if (native_platform == _EGL_INVALID_PLATFORM) {
