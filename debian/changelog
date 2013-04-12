@@ -1,3 +1,9 @@
+mesa (9.2~git20130402.b2eee086-0ubuntu0+mir4) raring; urgency=low
+
+  * Oops! Re-add in-process-egl support, dropped in dma-buf merge
+
+ -- Christopher James Halse Rogers <raof@ubuntu.com>  Fri, 12 Apr 2013 19:24:35 +1000
+
 mesa (9.2~git20130402.b2eee086-0ubuntu0+mir3) raring; urgency=low
 
   * Fix libgl1-mesa-dev and libegl1-mesa-dev dependencies: now needs xcb-dri2
