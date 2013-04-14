@@ -1,3 +1,10 @@
+mesa (9.2~git20130402.b2eee086-0ubuntu0+mir5) raring; urgency=low
+
+  * Undo in-process-egl support to build against Mir in staging. Once the new mir
+    is built, we'll re-enable this.
+
+ -- Christopher James Halse Rogers <raof@ubuntu.com>  Mon, 15 Apr 2013 09:38:38 +1000
+
 mesa (9.2~git20130402.b2eee086-0ubuntu0+mir4) raring; urgency=low
 
   * Oops! Re-add in-process-egl support, dropped in dma-buf merge

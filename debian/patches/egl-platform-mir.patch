@@ -548,7 +548,7 @@ index 985e781..feb2ae2 100644
  #endif
  
 +#ifdef HAVE_MIR_PLATFORM
-+   if (mir_egl_mesa_display_is_valid((MirMesaEGLNativeDisplay *)nativeDisplay))
++/*   if (mir_egl_mesa_display_is_valid((MirMesaEGLNativeDisplay *)nativeDisplay)) */
 +      return _EGL_PLATFORM_MIR;
 +#endif
 +
