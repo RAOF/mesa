@@ -1,3 +1,9 @@
+mesa (9.2~git20130402.b2eee086-0ubuntu0+mir7) raring; urgency=low
+
+  * Fix gbm_bo_write. For great hardware cursors!
+
+ -- Christopher James Halse Rogers <raof@ubuntu.com>  Mon, 29 Apr 2013 16:44:48 -0700
+
 mesa (9.2~git20130402.b2eee086-0ubuntu0+mir6) raring; urgency=low
 
   * And now re-add in-process-egl support now that an in-process-egl-capable Mir
