@@ -1,10 +1,10 @@
 diff --git a/configure.ac b/configure.ac
-index 81d4a3f..fd93ae9 100644
+index 70c598e..37e2fc5 100644
 --- a/configure.ac
 +++ b/configure.ac
-@@ -1515,7 +1515,9 @@ for plat in $egl_platforms; do
+@@ -1474,7 +1474,9 @@ for plat in $egl_platforms; do
  
- 	android|gdi)
+ 	android|fbdev|gdi|null)
  		;;
 -
 +        mir)
@@ -13,7 +13,7 @@ index 81d4a3f..fd93ae9 100644
  	*)
  		AC_MSG_ERROR([EGL platform '$plat' does not exist])
  		;;
-@@ -1543,6 +1545,7 @@ AM_CONDITIONAL(HAVE_EGL_PLATFORM_WAYLAND, echo "$egl_platforms" | grep 'wayland'
+@@ -1505,6 +1507,7 @@ AM_CONDITIONAL(HAVE_EGL_PLATFORM_WAYLAND, echo "$egl_platforms" | grep 'wayland'
  AM_CONDITIONAL(HAVE_EGL_PLATFORM_DRM, echo "$egl_platforms" | grep 'drm' >/dev/null 2>&1)
  AM_CONDITIONAL(HAVE_EGL_PLATFORM_FBDEV, echo "$egl_platforms" | grep 'fbdev' >/dev/null 2>&1)
  AM_CONDITIONAL(HAVE_EGL_PLATFORM_NULL, echo "$egl_platforms" | grep 'null' >/dev/null 2>&1)
@@ -21,6 +21,24 @@ index 81d4a3f..fd93ae9 100644
  
  AM_CONDITIONAL(HAVE_EGL_DRIVER_DRI2, test "x$HAVE_EGL_DRIVER_DRI2" != "x")
  AM_CONDITIONAL(HAVE_EGL_DRIVER_GLX, test "x$HAVE_EGL_DRIVER_GLX" != "x")
+diff --git a/include/EGL/eglplatform.h b/include/EGL/eglplatform.h
+index 17fdc61..ae2d837 100644
+--- a/include/EGL/eglplatform.h
++++ b/include/EGL/eglplatform.h
+@@ -104,6 +104,13 @@ typedef struct ANativeWindow        *EGLNativeWindowType;
+ typedef struct egl_native_pixmap_t  *EGLNativePixmapType;
+ typedef void                        *EGLNativeDisplayType;
+ 
++#elif defined(MIR_EGL_PLATFORM)
++
++#include <mir_toolkit/mir_client_library.h>
++typedef MirEGLNativeDisplayType EGLNativeDisplayType;
++typedef void                   *EGLNativePixmapType;
++typedef MirEGLNativeWindowType  EGLNativeWindowType;
++
+ #elif defined(__unix__)
+ 
+ #ifdef MESA_EGL_NO_X11_HEADERS
 diff --git a/include/GL/internal/dri_interface.h b/include/GL/internal/dri_interface.h
 index 30ce175..4855742 100644
 --- a/include/GL/internal/dri_interface.h
@@ -133,10 +151,10 @@ index 6dfdf94..fbb2696 100644
  char *
 diff --git a/src/egl/drivers/dri2/platform_mir.c b/src/egl/drivers/dri2/platform_mir.c
 new file mode 100644
-index 0000000..c62fc49
+index 0000000..50d3e1b
 --- /dev/null
 +++ b/src/egl/drivers/dri2/platform_mir.c
-@@ -0,0 +1,364 @@
+@@ -0,0 +1,365 @@
 +/*
 + * Copyright © 2012 Canonical, Inc
 + *
@@ -276,7 +294,7 @@ index 0000000..c62fc49
 +mir_populate_colour_buffers(struct dri2_egl_surface *surf)
 +{
 +   MirBufferPackage buffer_package;
-+   
++
 +   surf->mir_disp->surface_get_current_buffer(surf->mir_disp,
 +                                              (EGLNativeWindowType)surf->mir_surf,
 +                                              &buffer_package);
@@ -391,6 +409,7 @@ index 0000000..c62fc49
 +   (*dri2_dpy->flush->flush)(dri2_surf->dri_drawable);
 +
 +   dri2_surf->mir_disp->surface_advance_buffer(dri2_surf->mir_disp, (EGLNativeWindowType)dri2_surf->mir_surf);
++
 +   mir_populate_colour_buffers(dri2_surf);
 +
 +   (*dri2_dpy->flush->invalidate)(dri2_surf->dri_drawable);
@@ -719,10 +738,18 @@ index ffdd146..e4c9859 100644
  
  
 diff --git a/src/gallium/drivers/freedreno/freedreno_screen.c b/src/gallium/drivers/freedreno/freedreno_screen.c
-index 283d07f..a2a3a5e 100644
+index 283d07f..b914996 100644
 --- a/src/gallium/drivers/freedreno/freedreno_screen.c
 +++ b/src/gallium/drivers/freedreno/freedreno_screen.c
-@@ -421,6 +421,11 @@ fd_screen_bo_from_handle(struct pipe_screen *pscreen,
+@@ -200,6 +200,7 @@ fd_screen_get_param(struct pipe_screen *pscreen, enum pipe_cap param)
+ 	case PIPE_CAP_USER_VERTEX_BUFFERS:
+ 	case PIPE_CAP_USER_INDEX_BUFFERS:
+ 	case PIPE_CAP_QUERY_PIPELINE_STATISTICS:
++	case PIPE_CAP_PRIME:   
+ 		return 0;
+ 
+ 	/* Stream output. */
+@@ -421,6 +422,11 @@ fd_screen_bo_from_handle(struct pipe_screen *pscreen,
  	struct fd_screen *screen = fd_screen(pscreen);
  	struct fd_bo *bo;
  
@@ -734,11 +761,44 @@ index 283d07f..a2a3a5e 100644
  	bo = fd_bo_from_name(screen->dev, whandle->handle);
  	if (!bo) {
  		DBG("ref name 0x%08x failed", whandle->handle);
+diff --git a/src/gallium/drivers/i915/i915_screen.c b/src/gallium/drivers/i915/i915_screen.c
+index 54b2154..768eb7e 100644
+--- a/src/gallium/drivers/i915/i915_screen.c
++++ b/src/gallium/drivers/i915/i915_screen.c
+@@ -213,6 +213,7 @@ i915_get_param(struct pipe_screen *screen, enum pipe_cap cap)
+    case PIPE_CAP_QUERY_PIPELINE_STATISTICS:
+    case PIPE_CAP_TEXTURE_MULTISAMPLE:
+    case PIPE_CAP_MIN_MAP_BUFFER_ALIGNMENT:
++   case PIPE_CAP_PRIME:
+       return 0;
+ 
+    case PIPE_CAP_CONSTANT_BUFFER_OFFSET_ALIGNMENT:
+diff --git a/src/gallium/drivers/llvmpipe/lp_screen.c b/src/gallium/drivers/llvmpipe/lp_screen.c
+index ebcf680..e36db81 100644
+--- a/src/gallium/drivers/llvmpipe/lp_screen.c
++++ b/src/gallium/drivers/llvmpipe/lp_screen.c
+@@ -226,6 +226,8 @@ llvmpipe_get_param(struct pipe_screen *screen, enum pipe_cap param)
+       return 1;
+    case PIPE_CAP_PREFER_BLIT_BASED_TEXTURE_TRANSFER:
+       return 0;
++   case PIPE_CAP_PRIME:
++      return 0;
+    }
+    /* should only get here on unhandled cases */
+    debug_printf("Unexpected PIPE_CAP %d query\n", param);
 diff --git a/src/gallium/drivers/nouveau/nouveau_screen.c b/src/gallium/drivers/nouveau/nouveau_screen.c
-index d129a55..f05cb5b 100644
+index d129a55..6308a91 100644
 --- a/src/gallium/drivers/nouveau/nouveau_screen.c
 +++ b/src/gallium/drivers/nouveau/nouveau_screen.c
-@@ -86,7 +86,18 @@ nouveau_screen_bo_from_handle(struct pipe_screen *pscreen,
+@@ -14,6 +14,7 @@
+ #include <errno.h>
+ #include <stdlib.h>
+ 
++#include <xf86drm.h>
+ #include <libdrm/nouveau_drm.h>
+ 
+ #include "nouveau_winsys.h"
+@@ -86,7 +87,18 @@ nouveau_screen_bo_from_handle(struct pipe_screen *pscreen,
  	struct nouveau_bo *bo = 0;
  	int ret;
   
@@ -758,15 +818,216 @@ index d129a55..f05cb5b 100644
  	if (ret) {
  		debug_printf("%s: ref name 0x%08x failed with %d\n",
  			     __FUNCTION__, whandle->handle, ret);
-@@ -111,6 +122,8 @@ nouveau_screen_bo_get_handle(struct pipe_screen *pscreen,
+@@ -111,6 +123,8 @@ nouveau_screen_bo_get_handle(struct pipe_screen *pscreen,
  	} else if (whandle->type == DRM_API_HANDLE_TYPE_KMS) {
  		whandle->handle = bo->handle;
  		return TRUE;
 +	} else if (whandle->type == DRM_API_HANDLE_TYPE_FD) {
-+		return nouveau_bo_set_prime(bo, &whandle->handle) == 0;
++		return nouveau_bo_set_prime(bo, (int *)&whandle->handle) == 0;
  	} else {
  		return FALSE;
  	}
+@@ -161,6 +175,9 @@ nouveau_screen_init(struct nouveau_screen *screen, struct nouveau_device *dev)
+         if (!ret)
+            screen->cpu_gpu_time_delta = time - screen->cpu_gpu_time_delta * 1000;
+ 
++	screen->prime_caps = 0;
++	ret = drmGetCap(dev->fd, DRM_CAP_PRIME, &screen->prime_caps);
++	
+ 	pscreen->get_name = nouveau_screen_get_name;
+ 	pscreen->get_vendor = nouveau_screen_get_vendor;
+ 
+diff --git a/src/gallium/drivers/nouveau/nouveau_screen.h b/src/gallium/drivers/nouveau/nouveau_screen.h
+index 7f15d10..fc5531b 100644
+--- a/src/gallium/drivers/nouveau/nouveau_screen.h
++++ b/src/gallium/drivers/nouveau/nouveau_screen.h
+@@ -47,6 +47,8 @@ struct nouveau_screen {
+ 
+ 	int64_t cpu_gpu_time_delta;
+ 
++	uint64_t prime_caps;
++
+ 	boolean hint_buf_keep_sysmem_copy;
+ 
+ #ifdef NOUVEAU_ENABLE_DRIVER_STATISTICS
+diff --git a/src/gallium/drivers/nv30/nv30_screen.c b/src/gallium/drivers/nv30/nv30_screen.c
+index e33710e..22fb038 100644
+--- a/src/gallium/drivers/nv30/nv30_screen.c
++++ b/src/gallium/drivers/nv30/nv30_screen.c
+@@ -31,6 +31,8 @@
+ #include "nv30-40_3d.xml.h"
+ #include "nv01_2d.xml.h"
+ 
++#include <drm.h>
++
+ #include "nouveau/nouveau_fence.h"
+ #include "nv30_screen.h"
+ #include "nv30_context.h"
+@@ -129,6 +131,9 @@ nv30_screen_get_param(struct pipe_screen *pscreen, enum pipe_cap param)
+    case PIPE_CAP_VERTEX_ELEMENT_SRC_OFFSET_4BYTE_ALIGNED_ONLY:
+    case PIPE_CAP_PREFER_BLIT_BASED_TEXTURE_TRANSFER:
+       return 1;
++   case PIPE_CAP_PRIME:
++      return screen->base.prime_caps &
++         (DRM_PRIME_CAP_EXPORT | DRM_PRIME_CAP_IMPORT);
+    default:
+       debug_printf("unknown param %d\n", param);
+       return 0;
+diff --git a/src/gallium/drivers/nv50/nv50_screen.c b/src/gallium/drivers/nv50/nv50_screen.c
+index 55081be..4db250c 100644
+--- a/src/gallium/drivers/nv50/nv50_screen.c
++++ b/src/gallium/drivers/nv50/nv50_screen.c
+@@ -24,6 +24,8 @@
+ #include "util/u_format_s3tc.h"
+ #include "pipe/p_screen.h"
+ 
++#include <drm.h>
++
+ #include "nv50_context.h"
+ #include "nv50_screen.h"
+ 
+@@ -186,6 +188,9 @@ nv50_screen_get_param(struct pipe_screen *pscreen, enum pipe_cap param)
+       return 1;
+    case PIPE_CAP_QUERY_PIPELINE_STATISTICS:
+       return 0;
++   case PIPE_CAP_PRIME:
++      return nouveau_screen(pscreen)->prime_caps &
++         (DRM_PRIME_CAP_EXPORT | DRM_PRIME_CAP_IMPORT);
+    default:
+       NOUVEAU_ERR("unknown PIPE_CAP %d\n", param);
+       return 0;
+diff --git a/src/gallium/drivers/nvc0/nvc0_screen.c b/src/gallium/drivers/nvc0/nvc0_screen.c
+index ccdf2cd..7a6b465 100644
+--- a/src/gallium/drivers/nvc0/nvc0_screen.c
++++ b/src/gallium/drivers/nvc0/nvc0_screen.c
+@@ -24,6 +24,8 @@
+ #include "util/u_format_s3tc.h"
+ #include "pipe/p_screen.h"
+ 
++#include <drm.h>
++
+ #include "vl/vl_decoder.h"
+ #include "vl/vl_video_buffer.h"
+ 
+@@ -176,6 +178,9 @@ nvc0_screen_get_param(struct pipe_screen *pscreen, enum pipe_cap param)
+       return (class_3d >= NVE4_3D_CLASS) ? 1 : 0;
+    case PIPE_CAP_PREFER_BLIT_BASED_TEXTURE_TRANSFER:
+       return 1;
++   case PIPE_CAP_PRIME:
++      return nouveau_screen(pscreen)->prime_caps &
++         (DRM_PRIME_CAP_EXPORT | DRM_PRIME_CAP_IMPORT);
+    default:
+       NOUVEAU_ERR("unknown PIPE_CAP %d\n", param);
+       return 0;
+diff --git a/src/gallium/drivers/r300/r300_screen.c b/src/gallium/drivers/r300/r300_screen.c
+index 3175b3b..df35e07 100644
+--- a/src/gallium/drivers/r300/r300_screen.c
++++ b/src/gallium/drivers/r300/r300_screen.c
+@@ -28,6 +28,8 @@
+ #include "vl/vl_decoder.h"
+ #include "vl/vl_video_buffer.h"
+ 
++#include <drm.h>
++
+ #include "r300_context.h"
+ #include "r300_texture.h"
+ #include "r300_screen_buffer.h"
+@@ -189,6 +191,11 @@ static int r300_get_param(struct pipe_screen* pscreen, enum pipe_cap param)
+         /* Render targets. */
+         case PIPE_CAP_MAX_RENDER_TARGETS:
+             return 4;
++
++        /* PRIME import/export support */
++        case PIPE_CAP_PRIME:
++            return r300screen->info.prime_caps &
++                   (DRM_PRIME_CAP_IMPORT | DRM_PRIME_CAP_EXPORT);
+     }
+     return 0;
+ }
+diff --git a/src/gallium/drivers/r600/r600_pipe.c b/src/gallium/drivers/r600/r600_pipe.c
+index 9b43cef..d0ecf95 100644
+--- a/src/gallium/drivers/r600/r600_pipe.c
++++ b/src/gallium/drivers/r600/r600_pipe.c
+@@ -26,6 +26,8 @@
+ #include "evergreen_compute.h"
+ #include "r600d.h"
+ 
++#include <drm.h>
++
+ #include <errno.h>
+ #include "pipe/p_shader_tokens.h"
+ #include "util/u_blitter.h"
+@@ -654,6 +656,9 @@ static int r600_get_param(struct pipe_screen* pscreen, enum pipe_cap param)
+ 
+ 	case PIPE_CAP_MAX_TEXEL_OFFSET:
+ 		return 7;
++	case PIPE_CAP_PRIME:
++		return rscreen->info.prime_caps &
++			(DRM_PRIME_CAP_IMPORT | DRM_PRIME_CAP_EXPORT);
+ 	}
+ 	return 0;
+ }
+diff --git a/src/gallium/drivers/radeonsi/radeonsi_pipe.c b/src/gallium/drivers/radeonsi/radeonsi_pipe.c
+index 5c25b2f..5938edf 100644
+--- a/src/gallium/drivers/radeonsi/radeonsi_pipe.c
++++ b/src/gallium/drivers/radeonsi/radeonsi_pipe.c
+@@ -20,6 +20,7 @@
+  * OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
+  * USE OR OTHER DEALINGS IN THE SOFTWARE.
+  */
++#include <drm.h>
+ #include <stdio.h>
+ #include <errno.h>
+ #include "pipe/p_defines.h"
+@@ -422,6 +423,9 @@ static int r600_get_param(struct pipe_screen* pscreen, enum pipe_cap param)
+ 
+ 	case PIPE_CAP_MAX_TEXEL_OFFSET:
+ 		return 7;
++	case PIPE_CAP_PRIME:
++		return rscreen->info.prime_caps &
++			(DRM_PRIME_CAP_IMPORT | DRM_PRIME_CAP_EXPORT);
+ 	}
+ 	return 0;
+ }
+diff --git a/src/gallium/drivers/softpipe/sp_screen.c b/src/gallium/drivers/softpipe/sp_screen.c
+index b2b7f2e..17923bf 100644
+--- a/src/gallium/drivers/softpipe/sp_screen.c
++++ b/src/gallium/drivers/softpipe/sp_screen.c
+@@ -178,6 +178,8 @@ softpipe_get_param(struct pipe_screen *screen, enum pipe_cap param)
+    case PIPE_CAP_TGSI_TEXCOORD:
+    case PIPE_CAP_PREFER_BLIT_BASED_TEXTURE_TRANSFER:
+       return 0;
++   case PIPE_CAP_PRIME:
++      return 0;
+    }
+    /* should only get here on unhandled cases */
+    debug_printf("Unexpected PIPE_CAP %d query\n", param);
+diff --git a/src/gallium/drivers/svga/svga_screen.c b/src/gallium/drivers/svga/svga_screen.c
+index 6213535..8a1d3e6 100644
+--- a/src/gallium/drivers/svga/svga_screen.c
++++ b/src/gallium/drivers/svga/svga_screen.c
+@@ -263,6 +263,7 @@ svga_get_param(struct pipe_screen *screen, enum pipe_cap param)
+    case PIPE_CAP_TEXTURE_BUFFER_OBJECTS:
+    case PIPE_CAP_TEXTURE_BUFFER_OFFSET_ALIGNMENT:
+    case PIPE_CAP_QUERY_PIPELINE_STATISTICS:
++   case PIPE_CAP_PRIME:
+       return 0;
+    case PIPE_CAP_VERTEX_ELEMENT_SRC_OFFSET_4BYTE_ALIGNED_ONLY:
+       return 1;
+diff --git a/src/gallium/include/pipe/p_defines.h b/src/gallium/include/pipe/p_defines.h
+index 5b00acc..f665a99 100644
+--- a/src/gallium/include/pipe/p_defines.h
++++ b/src/gallium/include/pipe/p_defines.h
+@@ -505,7 +505,8 @@ enum pipe_cap {
+    PIPE_CAP_TEXTURE_BUFFER_OFFSET_ALIGNMENT = 78,
+    PIPE_CAP_TGSI_TEXCOORD = 79,
+    PIPE_CAP_PREFER_BLIT_BASED_TEXTURE_TRANSFER = 80,
+-   PIPE_CAP_QUERY_PIPELINE_STATISTICS = 81
++   PIPE_CAP_QUERY_PIPELINE_STATISTICS = 81,
++   PIPE_CAP_PRIME = 82
+ };
+ 
+ /**
 diff --git a/src/gallium/include/state_tracker/drm_driver.h b/src/gallium/include/state_tracker/drm_driver.h
 index f9bd222..5b76d87 100644
 --- a/src/gallium/include/state_tracker/drm_driver.h
@@ -795,7 +1056,7 @@ index f9bd222..5b76d87 100644
     unsigned type;
     /**
 diff --git a/src/gallium/state_trackers/dri/drm/dri2.c b/src/gallium/state_trackers/dri/drm/dri2.c
-index f8d311c..4b2b7b5 100644
+index f8d311c..1bafc67 100644
 --- a/src/gallium/state_trackers/dri/drm/dri2.c
 +++ b/src/gallium/state_trackers/dri/drm/dri2.c
 @@ -231,7 +231,13 @@ dri2_drawable_process_buffers(struct dri_drawable *drawable,
@@ -993,6 +1254,19 @@ index f8d311c..4b2b7b5 100644
  };
  
  /*
+@@ -813,6 +919,12 @@ dri2_init_screen(__DRIscreen * sPriv)
+       screen->default_throttle_frames = throttle_ret->val.val_int;
+    }
+ 
++   if (pscreen->get_param(pscreen, PIPE_CAP_PRIME)) {
++      dri2ImageExtension.base.version = 7;
++      dri2ImageExtension.createImageFromTexture = dri2_create_from_texture;
++      dri2ImageExtension.createImageFromFds = dri2_from_fds;
++   }
++
+    sPriv->extensions = dri_screen_extensions;
+ 
+    /* dri_init_screen_helper checks pscreen for us */
 diff --git a/src/gallium/state_trackers/egl/common/native_helper.c b/src/gallium/state_trackers/egl/common/native_helper.c
 index 99259b8..eda6668 100644
 --- a/src/gallium/state_trackers/egl/common/native_helper.c
@@ -1037,10 +1311,10 @@ index ac66af3..38e0619 100644
        return NULL;
  
 diff --git a/src/gallium/winsys/radeon/drm/radeon_drm_bo.c b/src/gallium/winsys/radeon/drm/radeon_drm_bo.c
-index 9e45dcc..2cf5547 100644
+index 6ec1713..0a06e6b 100644
 --- a/src/gallium/winsys/radeon/drm/radeon_drm_bo.c
 +++ b/src/gallium/winsys/radeon/drm/radeon_drm_bo.c
-@@ -39,6 +39,7 @@
+@@ -40,6 +40,7 @@
  #include <sys/ioctl.h>
  #include <xf86drm.h>
  #include <errno.h>
@@ -1048,7 +1322,7 @@ index 9e45dcc..2cf5547 100644
  
  /*
   * this are copy from radeon_drm, once an updated libdrm is released
-@@ -113,7 +114,9 @@ struct radeon_bomgr {
+@@ -114,7 +115,9 @@ struct radeon_bomgr {
      /* Winsys. */
      struct radeon_drm_winsys *rws;
  
@@ -1059,7 +1333,7 @@ index 9e45dcc..2cf5547 100644
      struct util_hash_table *bo_handles;
      pipe_mutex bo_handles_mutex;
      pipe_mutex bo_va_mutex;
-@@ -369,12 +372,13 @@ static void radeon_bo_destroy(struct pb_buffer *_buf)
+@@ -370,12 +373,13 @@ static void radeon_bo_destroy(struct pb_buffer *_buf)
  
      memset(&args, 0, sizeof(args));
  
@@ -1076,7 +1350,7 @@ index 9e45dcc..2cf5547 100644
  
      if (bo->ptr)
          os_munmap(bo->ptr, bo->base.size);
-@@ -653,7 +657,8 @@ static boolean radeon_bomgr_is_buffer_busy(struct pb_manager *_mgr,
+@@ -658,7 +662,8 @@ static boolean radeon_bomgr_is_buffer_busy(struct pb_manager *_mgr,
  static void radeon_bomgr_destroy(struct pb_manager *_mgr)
  {
      struct radeon_bomgr *mgr = radeon_bomgr(_mgr);
@@ -1086,7 +1360,7 @@ index 9e45dcc..2cf5547 100644
      pipe_mutex_destroy(mgr->bo_handles_mutex);
      pipe_mutex_destroy(mgr->bo_va_mutex);
      FREE(mgr);
-@@ -685,6 +690,7 @@ struct pb_manager *radeon_bomgr_create(struct radeon_drm_winsys *rws)
+@@ -690,6 +695,7 @@ struct pb_manager *radeon_bomgr_create(struct radeon_drm_winsys *rws)
      mgr->base.is_buffer_busy = radeon_bomgr_is_buffer_busy;
  
      mgr->rws = rws;
@@ -1094,7 +1368,7 @@ index 9e45dcc..2cf5547 100644
      mgr->bo_handles = util_hash_table_create(handle_hash, handle_compare);
      pipe_mutex_init(mgr->bo_handles_mutex);
      pipe_mutex_init(mgr->bo_va_mutex);
-@@ -834,6 +840,7 @@ radeon_winsys_bo_create(struct radeon_winsys *rws,
+@@ -839,6 +845,7 @@ radeon_winsys_bo_create(struct radeon_winsys *rws,
                          enum radeon_bo_domain domain)
  {
      struct radeon_drm_winsys *ws = radeon_drm_winsys(rws);
@@ -1102,7 +1376,7 @@ index 9e45dcc..2cf5547 100644
      struct radeon_bo_desc desc;
      struct pb_manager *provider;
      struct pb_buffer *buffer;
-@@ -855,6 +862,10 @@ radeon_winsys_bo_create(struct radeon_winsys *rws,
+@@ -860,6 +867,10 @@ radeon_winsys_bo_create(struct radeon_winsys *rws,
      if (!buffer)
          return NULL;
  
@@ -1113,7 +1387,7 @@ index 9e45dcc..2cf5547 100644
      return (struct pb_buffer*)buffer;
  }
  
-@@ -867,6 +878,7 @@ static struct pb_buffer *radeon_winsys_bo_from_handle(struct radeon_winsys *rws,
+@@ -872,6 +883,7 @@ static struct pb_buffer *radeon_winsys_bo_from_handle(struct radeon_winsys *rws,
      struct radeon_bomgr *mgr = radeon_bomgr(ws->kman);
      struct drm_gem_open open_arg = {};
      int r;
@@ -1121,7 +1395,7 @@ index 9e45dcc..2cf5547 100644
  
      memset(&open_arg, 0, sizeof(open_arg));
  
-@@ -878,8 +890,20 @@ static struct pb_buffer *radeon_winsys_bo_from_handle(struct radeon_winsys *rws,
+@@ -883,8 +895,20 @@ static struct pb_buffer *radeon_winsys_bo_from_handle(struct radeon_winsys *rws,
       * The list of pairs is guarded by a mutex, of course. */
      pipe_mutex_lock(mgr->bo_handles_mutex);
  
@@ -1144,7 +1418,7 @@ index 9e45dcc..2cf5547 100644
      if (bo) {
          /* Increase the refcount. */
          struct pb_buffer *b = NULL;
-@@ -893,27 +917,38 @@ static struct pb_buffer *radeon_winsys_bo_from_handle(struct radeon_winsys *rws,
+@@ -898,27 +922,38 @@ static struct pb_buffer *radeon_winsys_bo_from_handle(struct radeon_winsys *rws,
          goto fail;
      }
  
@@ -1192,7 +1466,7 @@ index 9e45dcc..2cf5547 100644
  
  done:
      pipe_mutex_unlock(mgr->bo_handles_mutex);
-@@ -951,6 +986,9 @@ done:
+@@ -956,6 +991,9 @@ done:
      ws->allocated_vram += align(open_arg.size, 4096);
      bo->initial_domain = RADEON_DOMAIN_VRAM;
  
@@ -1202,7 +1476,7 @@ index 9e45dcc..2cf5547 100644
      return (struct pb_buffer*)bo;
  
  fail:
-@@ -979,12 +1017,15 @@ static boolean radeon_winsys_bo_get_handle(struct pb_buffer *buffer,
+@@ -984,12 +1022,15 @@ static boolean radeon_winsys_bo_get_handle(struct pb_buffer *buffer,
              bo->flink = flink.name;
  
              pipe_mutex_lock(bo->mgr->bo_handles_mutex);
@@ -1219,6 +1493,34 @@ index 9e45dcc..2cf5547 100644
      }
  
      whandle->stride = stride;
+diff --git a/src/gallium/winsys/radeon/drm/radeon_drm_winsys.c b/src/gallium/winsys/radeon/drm/radeon_drm_winsys.c
+index f6877d5..412d280 100644
+--- a/src/gallium/winsys/radeon/drm/radeon_drm_winsys.c
++++ b/src/gallium/winsys/radeon/drm/radeon_drm_winsys.c
+@@ -340,6 +340,10 @@ static boolean do_winsys_init(struct radeon_drm_winsys *ws)
+             ws->info.has_uvd = value;
+     }
+ 
++    /* Check for PRIME */
++    ws->info.prime_caps = 0;
++    drmGetCap(ws->fd, DRM_CAP_PRIME, &ws->info.prime_caps);
++
+     /* Get GEM info. */
+     retval = drmCommandWriteRead(ws->fd, DRM_RADEON_GEM_INFO,
+             &gem_info, sizeof(gem_info));
+diff --git a/src/gallium/winsys/radeon/drm/radeon_winsys.h b/src/gallium/winsys/radeon/drm/radeon_winsys.h
+index a37bd12..60cef3c 100644
+--- a/src/gallium/winsys/radeon/drm/radeon_winsys.h
++++ b/src/gallium/winsys/radeon/drm/radeon_winsys.h
+@@ -178,6 +178,8 @@ struct radeon_info {
+     uint32_t                    r300_num_gb_pipes;
+     uint32_t                    r300_num_z_pipes;
+ 
++    uint64_t                    prime_caps;
++
+     uint32_t                    r600_num_backends;
+     uint32_t                    r600_clock_crystal_freq;
+     uint32_t                    r600_tiling_config;
 diff --git a/src/gallium/winsys/svga/drm/vmw_screen_dri.c b/src/gallium/winsys/svga/drm/vmw_screen_dri.c
 index 511cca7..6323a8a 100644
 --- a/src/gallium/winsys/svga/drm/vmw_screen_dri.c
@@ -1237,7 +1539,7 @@ index 511cca7..6323a8a 100644
       * The vmware device specific handle is the hardware SID.
       * FIXME: We probably want to move this to the ioctl implementations.
 diff --git a/src/gbm/backends/dri/gbm_dri.c b/src/gbm/backends/dri/gbm_dri.c
-index a3a0530..7542e93 100644
+index a3a0530..6701b14 100644
 --- a/src/gbm/backends/dri/gbm_dri.c
 +++ b/src/gbm/backends/dri/gbm_dri.c
 @@ -44,6 +44,8 @@
@@ -1397,10 +1699,10 @@ index a3a0530..7542e93 100644
     if (usage & GBM_BO_USE_SCANOUT)
        dri_use |= __DRI_IMAGE_USE_SCANOUT;
 diff --git a/src/mesa/drivers/dri/intel/intel_context.c b/src/mesa/drivers/dri/intel/intel_context.c
-index bf4045e..f0a4198 100644
+index 0a1dd75..fbfacb7 100644
 --- a/src/mesa/drivers/dri/intel/intel_context.c
 +++ b/src/mesa/drivers/dri/intel/intel_context.c
-@@ -1105,34 +1105,47 @@ intel_process_dri2_buffer(struct intel_context *intel,
+@@ -1129,34 +1129,47 @@ intel_process_dri2_buffer(struct intel_context *intel,
      * use of a mapping of the buffer involves a bunch of page faulting which is
      * moderately expensive.
      */
