@@ -1,3 +1,9 @@
+mesa (9.2~git20130515.392f6cfc-0ubuntu0+mir1) saucy; urgency=low
+
+  * Update to new upstream snapshot
+
+ -- Christopher James Halse Rogers <raof@ubuntu.com>  Wed, 15 May 2013 12:40:25 +1000
+
 mesa (9.2~git20130402.b2eee086-0ubuntu0+mir7) raring; urgency=low
 
   * Fix gbm_bo_write. For great hardware cursors!
