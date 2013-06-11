@@ -1,8 +1,8 @@
 diff --git a/configure.ac b/configure.ac
-index 70c598e..37e2fc5 100644
+index 6832b0d..4be9efc 100644
 --- a/configure.ac
 +++ b/configure.ac
-@@ -1474,7 +1474,9 @@ for plat in $egl_platforms; do
+@@ -1451,7 +1451,9 @@ for plat in $egl_platforms; do
  
  	android|fbdev|gdi|null)
  		;;
@@ -13,7 +13,7 @@ index 70c598e..37e2fc5 100644
  	*)
  		AC_MSG_ERROR([EGL platform '$plat' does not exist])
  		;;
-@@ -1505,6 +1507,7 @@ AM_CONDITIONAL(HAVE_EGL_PLATFORM_WAYLAND, echo "$egl_platforms" | grep 'wayland'
+@@ -1482,6 +1484,7 @@ AM_CONDITIONAL(HAVE_EGL_PLATFORM_WAYLAND, echo "$egl_platforms" | grep 'wayland'
  AM_CONDITIONAL(HAVE_EGL_PLATFORM_DRM, echo "$egl_platforms" | grep 'drm' >/dev/null 2>&1)
  AM_CONDITIONAL(HAVE_EGL_PLATFORM_FBDEV, echo "$egl_platforms" | grep 'fbdev' >/dev/null 2>&1)
  AM_CONDITIONAL(HAVE_EGL_PLATFORM_NULL, echo "$egl_platforms" | grep 'null' >/dev/null 2>&1)
@@ -72,7 +72,7 @@ index 45f7dfa..dfb0c05 100644
 +AM_CFLAGS += $(MIR_CFLAGS)
 +endif
 diff --git a/src/egl/drivers/dri2/egl_dri2.c b/src/egl/drivers/dri2/egl_dri2.c
-index 06a21d7..558914f 100644
+index 1bce314..b867391 100644
 --- a/src/egl/drivers/dri2/egl_dri2.c
 +++ b/src/egl/drivers/dri2/egl_dri2.c
 @@ -599,6 +599,12 @@ dri2_initialize(_EGLDriver *drv, _EGLDisplay *disp)
@@ -151,10 +151,10 @@ index 6dfdf94..fbb2696 100644
  char *
 diff --git a/src/egl/drivers/dri2/platform_mir.c b/src/egl/drivers/dri2/platform_mir.c
 new file mode 100644
-index 0000000..50d3e1b
+index 0000000..1c8c159
 --- /dev/null
 +++ b/src/egl/drivers/dri2/platform_mir.c
-@@ -0,0 +1,365 @@
+@@ -0,0 +1,362 @@
 +/*
 + * Copyright © 2012 Canonical, Inc
 + *
@@ -294,11 +294,9 @@ index 0000000..50d3e1b
 +mir_populate_colour_buffers(struct dri2_egl_surface *surf)
 +{
 +   MirBufferPackage buffer_package;
-+
 +   surf->mir_disp->surface_get_current_buffer(surf->mir_disp,
 +                                              (EGLNativeWindowType)surf->mir_surf,
 +                                              &buffer_package);
-+
 +   /* We expect no data items, and (for the moment) one PRIME fd */
 +   assert(buffer_package.data_items == 0);
 +   assert(buffer_package.fd_items == 1);
@@ -337,7 +335,6 @@ index 0000000..50d3e1b
 +   dri2_surf->mir_surf = (MirSurface *)window;
 +   dri2_surf->mir_disp->surface_get_parameters(dri2_surf->mir_disp, (EGLNativeWindowType)dri2_surf->mir_surf,
 +                                               &surf_params);
-+
 +   dri2_surf->base.Width = surf_params.width;
 +   dri2_surf->base.Height = surf_params.height;
 +
@@ -406,9 +403,9 @@ index 0000000..50d3e1b
 +   struct dri2_egl_surface *dri2_surf = dri2_egl_surface(draw);
 +   struct dri2_egl_driver *dri2_drv = dri2_egl_driver(drv);
 +
-+   (*dri2_dpy->flush->flush)(dri2_surf->dri_drawable);
-+
 +   dri2_surf->mir_disp->surface_advance_buffer(dri2_surf->mir_disp, (EGLNativeWindowType)dri2_surf->mir_surf);
++
++   (*dri2_dpy->flush->flush)(dri2_surf->dri_drawable);
 +
 +   mir_populate_colour_buffers(dri2_surf);
 +
@@ -584,7 +581,7 @@ index 985e781..feb2ae2 100644
  
     if (native_platform == _EGL_INVALID_PLATFORM) {
 diff --git a/src/egl/main/egldisplay.h b/src/egl/main/egldisplay.h
-index 4b33470..3999d22 100644
+index f990300..59eb30c 100644
 --- a/src/egl/main/egldisplay.h
 +++ b/src/egl/main/egldisplay.h
 @@ -46,6 +46,7 @@ enum _egl_platform_type {
@@ -738,18 +735,18 @@ index ffdd146..e4c9859 100644
  
  
 diff --git a/src/gallium/drivers/freedreno/freedreno_screen.c b/src/gallium/drivers/freedreno/freedreno_screen.c
-index 283d07f..b914996 100644
+index f88fa08..6a5095c 100644
 --- a/src/gallium/drivers/freedreno/freedreno_screen.c
 +++ b/src/gallium/drivers/freedreno/freedreno_screen.c
-@@ -200,6 +200,7 @@ fd_screen_get_param(struct pipe_screen *pscreen, enum pipe_cap param)
- 	case PIPE_CAP_USER_VERTEX_BUFFERS:
+@@ -193,6 +193,7 @@ fd_screen_get_param(struct pipe_screen *pscreen, enum pipe_cap param)
  	case PIPE_CAP_USER_INDEX_BUFFERS:
  	case PIPE_CAP_QUERY_PIPELINE_STATISTICS:
+ 	case PIPE_CAP_TEXTURE_BORDER_COLOR_QUIRK:
 +	case PIPE_CAP_PRIME:   
  		return 0;
  
  	/* Stream output. */
-@@ -421,6 +422,11 @@ fd_screen_bo_from_handle(struct pipe_screen *pscreen,
+@@ -346,6 +347,11 @@ fd_screen_bo_from_handle(struct pipe_screen *pscreen,
  	struct fd_screen *screen = fd_screen(pscreen);
  	struct fd_bo *bo;
  
@@ -762,25 +759,25 @@ index 283d07f..b914996 100644
  	if (!bo) {
  		DBG("ref name 0x%08x failed", whandle->handle);
 diff --git a/src/gallium/drivers/i915/i915_screen.c b/src/gallium/drivers/i915/i915_screen.c
-index 54b2154..768eb7e 100644
+index 2d0cc78..92b650f 100644
 --- a/src/gallium/drivers/i915/i915_screen.c
 +++ b/src/gallium/drivers/i915/i915_screen.c
-@@ -213,6 +213,7 @@ i915_get_param(struct pipe_screen *screen, enum pipe_cap cap)
-    case PIPE_CAP_QUERY_PIPELINE_STATISTICS:
+@@ -214,6 +214,7 @@ i915_get_param(struct pipe_screen *screen, enum pipe_cap cap)
     case PIPE_CAP_TEXTURE_MULTISAMPLE:
     case PIPE_CAP_MIN_MAP_BUFFER_ALIGNMENT:
+    case PIPE_CAP_TEXTURE_BORDER_COLOR_QUIRK:
 +   case PIPE_CAP_PRIME:
        return 0;
- 
-    case PIPE_CAP_CONSTANT_BUFFER_OFFSET_ALIGNMENT:
+    case PIPE_CAP_MAX_DUAL_SOURCE_RENDER_TARGETS:
+    case PIPE_CAP_STREAM_OUTPUT_PAUSE_RESUME:
 diff --git a/src/gallium/drivers/llvmpipe/lp_screen.c b/src/gallium/drivers/llvmpipe/lp_screen.c
-index ebcf680..e36db81 100644
+index 562fb51..6053efb 100644
 --- a/src/gallium/drivers/llvmpipe/lp_screen.c
 +++ b/src/gallium/drivers/llvmpipe/lp_screen.c
-@@ -226,6 +226,8 @@ llvmpipe_get_param(struct pipe_screen *screen, enum pipe_cap param)
-       return 1;
-    case PIPE_CAP_PREFER_BLIT_BASED_TEXTURE_TRANSFER:
+@@ -232,6 +232,8 @@ llvmpipe_get_param(struct pipe_screen *screen, enum pipe_cap param)
        return 0;
+    case PIPE_CAP_MAX_VIEWPORTS:
+       return PIPE_MAX_VIEWPORTS;
 +   case PIPE_CAP_PRIME:
 +      return 0;
     }
@@ -851,7 +848,7 @@ index 7f15d10..fc5531b 100644
  
  #ifdef NOUVEAU_ENABLE_DRIVER_STATISTICS
 diff --git a/src/gallium/drivers/nv30/nv30_screen.c b/src/gallium/drivers/nv30/nv30_screen.c
-index e33710e..22fb038 100644
+index c9943e0..2e0dabe 100644
 --- a/src/gallium/drivers/nv30/nv30_screen.c
 +++ b/src/gallium/drivers/nv30/nv30_screen.c
 @@ -31,6 +31,8 @@
@@ -863,7 +860,14 @@ index e33710e..22fb038 100644
  #include "nouveau/nouveau_fence.h"
  #include "nv30_screen.h"
  #include "nv30_context.h"
-@@ -129,6 +131,9 @@ nv30_screen_get_param(struct pipe_screen *pscreen, enum pipe_cap param)
+@@ -125,12 +127,16 @@ nv30_screen_get_param(struct pipe_screen *pscreen, enum pipe_cap param)
+    case PIPE_CAP_QUERY_PIPELINE_STATISTICS:
+    case PIPE_CAP_TEXTURE_BORDER_COLOR_QUIRK:
+    case PIPE_CAP_MAX_TEXTURE_BUFFER_SIZE:
++   case PIPE_CAP_PRIME:
+       return 0;
+    case PIPE_CAP_VERTEX_BUFFER_OFFSET_4BYTE_ALIGNED_ONLY:
+    case PIPE_CAP_VERTEX_BUFFER_STRIDE_4BYTE_ALIGNED_ONLY:
     case PIPE_CAP_VERTEX_ELEMENT_SRC_OFFSET_4BYTE_ALIGNED_ONLY:
     case PIPE_CAP_PREFER_BLIT_BASED_TEXTURE_TRANSFER:
        return 1;
@@ -874,7 +878,7 @@ index e33710e..22fb038 100644
        debug_printf("unknown param %d\n", param);
        return 0;
 diff --git a/src/gallium/drivers/nv50/nv50_screen.c b/src/gallium/drivers/nv50/nv50_screen.c
-index 55081be..4db250c 100644
+index b6da303..88eabd4 100644
 --- a/src/gallium/drivers/nv50/nv50_screen.c
 +++ b/src/gallium/drivers/nv50/nv50_screen.c
 @@ -24,6 +24,8 @@
@@ -886,10 +890,10 @@ index 55081be..4db250c 100644
  #include "nv50_context.h"
  #include "nv50_screen.h"
  
-@@ -186,6 +188,9 @@ nv50_screen_get_param(struct pipe_screen *pscreen, enum pipe_cap param)
-       return 1;
-    case PIPE_CAP_QUERY_PIPELINE_STATISTICS:
+@@ -190,6 +192,9 @@ nv50_screen_get_param(struct pipe_screen *pscreen, enum pipe_cap param)
        return 0;
+    case PIPE_CAP_TEXTURE_BORDER_COLOR_QUIRK:
+       return PIPE_QUIRK_TEXTURE_BORDER_COLOR_SWIZZLE_NV50;
 +   case PIPE_CAP_PRIME:
 +      return nouveau_screen(pscreen)->prime_caps &
 +         (DRM_PRIME_CAP_EXPORT | DRM_PRIME_CAP_IMPORT);
@@ -897,7 +901,7 @@ index 55081be..4db250c 100644
        NOUVEAU_ERR("unknown PIPE_CAP %d\n", param);
        return 0;
 diff --git a/src/gallium/drivers/nvc0/nvc0_screen.c b/src/gallium/drivers/nvc0/nvc0_screen.c
-index ccdf2cd..7a6b465 100644
+index 97ce82c..b7dca8b 100644
 --- a/src/gallium/drivers/nvc0/nvc0_screen.c
 +++ b/src/gallium/drivers/nvc0/nvc0_screen.c
 @@ -24,6 +24,8 @@
@@ -909,10 +913,10 @@ index ccdf2cd..7a6b465 100644
  #include "vl/vl_decoder.h"
  #include "vl/vl_video_buffer.h"
  
-@@ -176,6 +178,9 @@ nvc0_screen_get_param(struct pipe_screen *pscreen, enum pipe_cap param)
-       return (class_3d >= NVE4_3D_CLASS) ? 1 : 0;
-    case PIPE_CAP_PREFER_BLIT_BASED_TEXTURE_TRANSFER:
+@@ -180,6 +182,9 @@ nvc0_screen_get_param(struct pipe_screen *pscreen, enum pipe_cap param)
        return 1;
+    case PIPE_CAP_TEXTURE_BORDER_COLOR_QUIRK:
+       return PIPE_QUIRK_TEXTURE_BORDER_COLOR_SWIZZLE_NV50;
 +   case PIPE_CAP_PRIME:
 +      return nouveau_screen(pscreen)->prime_caps &
 +         (DRM_PRIME_CAP_EXPORT | DRM_PRIME_CAP_IMPORT);
@@ -920,7 +924,7 @@ index ccdf2cd..7a6b465 100644
        NOUVEAU_ERR("unknown PIPE_CAP %d\n", param);
        return 0;
 diff --git a/src/gallium/drivers/r300/r300_screen.c b/src/gallium/drivers/r300/r300_screen.c
-index 3175b3b..df35e07 100644
+index e58916b..0bb7d00 100644
 --- a/src/gallium/drivers/r300/r300_screen.c
 +++ b/src/gallium/drivers/r300/r300_screen.c
 @@ -28,6 +28,8 @@
@@ -932,7 +936,15 @@ index 3175b3b..df35e07 100644
  #include "r300_context.h"
  #include "r300_texture.h"
  #include "r300_screen_buffer.h"
-@@ -189,6 +191,11 @@ static int r300_get_param(struct pipe_screen* pscreen, enum pipe_cap param)
+@@ -164,6 +166,7 @@ static int r300_get_param(struct pipe_screen* pscreen, enum pipe_cap param)
+         case PIPE_CAP_TEXTURE_BUFFER_OFFSET_ALIGNMENT:
+         case PIPE_CAP_TEXTURE_BORDER_COLOR_QUIRK:
+         case PIPE_CAP_MAX_TEXTURE_BUFFER_SIZE:
++        case PIPE_CAP_PRIME:
+             return 0;
+ 
+         /* SWTCL-only features. */
+@@ -191,6 +194,11 @@ static int r300_get_param(struct pipe_screen* pscreen, enum pipe_cap param)
          /* Render targets. */
          case PIPE_CAP_MAX_RENDER_TARGETS:
              return 4;
@@ -945,22 +957,22 @@ index 3175b3b..df35e07 100644
      return 0;
  }
 diff --git a/src/gallium/drivers/r600/r600_pipe.c b/src/gallium/drivers/r600/r600_pipe.c
-index 9b43cef..d0ecf95 100644
+index 71f555b..a17cda0 100644
 --- a/src/gallium/drivers/r600/r600_pipe.c
 +++ b/src/gallium/drivers/r600/r600_pipe.c
-@@ -26,6 +26,8 @@
- #include "evergreen_compute.h"
+@@ -27,6 +27,7 @@
  #include "r600d.h"
  
+ #include "sb/sb_public.h"
 +#include <drm.h>
-+
+ 
  #include <errno.h>
  #include "pipe/p_shader_tokens.h"
- #include "util/u_blitter.h"
-@@ -654,6 +656,9 @@ static int r600_get_param(struct pipe_screen* pscreen, enum pipe_cap param)
+@@ -673,6 +674,10 @@ static int r600_get_param(struct pipe_screen* pscreen, enum pipe_cap param)
  
- 	case PIPE_CAP_MAX_TEXEL_OFFSET:
- 		return 7;
+ 	case PIPE_CAP_TEXTURE_BORDER_COLOR_QUIRK:
+ 		return PIPE_QUIRK_TEXTURE_BORDER_COLOR_SWIZZLE_R600;
++
 +	case PIPE_CAP_PRIME:
 +		return rscreen->info.prime_caps &
 +			(DRM_PRIME_CAP_IMPORT | DRM_PRIME_CAP_EXPORT);
@@ -968,7 +980,7 @@ index 9b43cef..d0ecf95 100644
  	return 0;
  }
 diff --git a/src/gallium/drivers/radeonsi/radeonsi_pipe.c b/src/gallium/drivers/radeonsi/radeonsi_pipe.c
-index 5c25b2f..5938edf 100644
+index 382311f..a3d5b12 100644
 --- a/src/gallium/drivers/radeonsi/radeonsi_pipe.c
 +++ b/src/gallium/drivers/radeonsi/radeonsi_pipe.c
 @@ -20,6 +20,7 @@
@@ -979,7 +991,15 @@ index 5c25b2f..5938edf 100644
  #include <stdio.h>
  #include <errno.h>
  #include "pipe/p_defines.h"
-@@ -422,6 +423,9 @@ static int r600_get_param(struct pipe_screen* pscreen, enum pipe_cap param)
+@@ -384,6 +385,7 @@ static int r600_get_param(struct pipe_screen* pscreen, enum pipe_cap param)
+ 	case PIPE_CAP_TEXTURE_BUFFER_OFFSET_ALIGNMENT:
+ 	case PIPE_CAP_TEXTURE_BORDER_COLOR_QUIRK:
+         case PIPE_CAP_MAX_TEXTURE_BUFFER_SIZE:
++	case PIPE_CAP_PRIME:
+ 		return 0;
+ 
+ 	/* Stream output. */
+@@ -426,6 +428,9 @@ static int r600_get_param(struct pipe_screen* pscreen, enum pipe_cap param)
  
  	case PIPE_CAP_MAX_TEXEL_OFFSET:
  		return 7;
@@ -990,44 +1010,44 @@ index 5c25b2f..5938edf 100644
  	return 0;
  }
 diff --git a/src/gallium/drivers/softpipe/sp_screen.c b/src/gallium/drivers/softpipe/sp_screen.c
-index b2b7f2e..17923bf 100644
+index 16311fa..fb6313f 100644
 --- a/src/gallium/drivers/softpipe/sp_screen.c
 +++ b/src/gallium/drivers/softpipe/sp_screen.c
-@@ -178,6 +178,8 @@ softpipe_get_param(struct pipe_screen *screen, enum pipe_cap param)
-    case PIPE_CAP_TGSI_TEXCOORD:
-    case PIPE_CAP_PREFER_BLIT_BASED_TEXTURE_TRANSFER:
+@@ -184,6 +184,8 @@ softpipe_get_param(struct pipe_screen *screen, enum pipe_cap param)
        return 0;
+    case PIPE_CAP_MAX_VIEWPORTS:
+       return 1;
 +   case PIPE_CAP_PRIME:
 +      return 0;
     }
     /* should only get here on unhandled cases */
     debug_printf("Unexpected PIPE_CAP %d query\n", param);
 diff --git a/src/gallium/drivers/svga/svga_screen.c b/src/gallium/drivers/svga/svga_screen.c
-index 6213535..8a1d3e6 100644
+index 826a9a9..ca958d5 100644
 --- a/src/gallium/drivers/svga/svga_screen.c
 +++ b/src/gallium/drivers/svga/svga_screen.c
-@@ -263,6 +263,7 @@ svga_get_param(struct pipe_screen *screen, enum pipe_cap param)
-    case PIPE_CAP_TEXTURE_BUFFER_OBJECTS:
+@@ -266,6 +266,7 @@ svga_get_param(struct pipe_screen *screen, enum pipe_cap param)
     case PIPE_CAP_TEXTURE_BUFFER_OFFSET_ALIGNMENT:
     case PIPE_CAP_QUERY_PIPELINE_STATISTICS:
+    case PIPE_CAP_MAX_TEXTURE_BUFFER_SIZE:
 +   case PIPE_CAP_PRIME:
        return 0;
     case PIPE_CAP_VERTEX_ELEMENT_SRC_OFFSET_4BYTE_ALIGNED_ONLY:
        return 1;
 diff --git a/src/gallium/include/pipe/p_defines.h b/src/gallium/include/pipe/p_defines.h
-index 5b00acc..f665a99 100644
+index 8af1a84..6833e6a 100644
 --- a/src/gallium/include/pipe/p_defines.h
 +++ b/src/gallium/include/pipe/p_defines.h
-@@ -505,7 +505,8 @@ enum pipe_cap {
-    PIPE_CAP_TEXTURE_BUFFER_OFFSET_ALIGNMENT = 78,
-    PIPE_CAP_TGSI_TEXCOORD = 79,
-    PIPE_CAP_PREFER_BLIT_BASED_TEXTURE_TRANSFER = 80,
--   PIPE_CAP_QUERY_PIPELINE_STATISTICS = 81
-+   PIPE_CAP_QUERY_PIPELINE_STATISTICS = 81,
-+   PIPE_CAP_PRIME = 82
+@@ -508,7 +508,8 @@ enum pipe_cap {
+    PIPE_CAP_QUERY_PIPELINE_STATISTICS = 81,
+    PIPE_CAP_TEXTURE_BORDER_COLOR_QUIRK = 82,
+    PIPE_CAP_MAX_TEXTURE_BUFFER_SIZE = 83,
+-   PIPE_CAP_MAX_VIEWPORTS = 84
++   PIPE_CAP_MAX_VIEWPORTS = 84,
++   PIPE_CAP_PRIME = 85
  };
  
- /**
+ #define PIPE_QUIRK_TEXTURE_BORDER_COLOR_SWIZZLE_NV50 (1 << 0)
 diff --git a/src/gallium/include/state_tracker/drm_driver.h b/src/gallium/include/state_tracker/drm_driver.h
 index f9bd222..5b76d87 100644
 --- a/src/gallium/include/state_tracker/drm_driver.h
@@ -1056,10 +1076,10 @@ index f9bd222..5b76d87 100644
     unsigned type;
     /**
 diff --git a/src/gallium/state_trackers/dri/drm/dri2.c b/src/gallium/state_trackers/dri/drm/dri2.c
-index f8d311c..1bafc67 100644
+index 1839b16..63b1de6 100644
 --- a/src/gallium/state_trackers/dri/drm/dri2.c
 +++ b/src/gallium/state_trackers/dri/drm/dri2.c
-@@ -231,7 +231,13 @@ dri2_drawable_process_buffers(struct dri_drawable *drawable,
+@@ -230,7 +230,13 @@ dri2_drawable_process_buffers(struct dri_drawable *drawable,
  
        templ.format = format;
        templ.bind = bind;
@@ -1074,7 +1094,7 @@ index f8d311c..1bafc67 100644
        whandle.stride = buf->pitch;
  
        drawable->textures[statt] =
-@@ -452,14 +458,14 @@ dri2_lookup_egl_image(struct dri_screen *screen, void *handle)
+@@ -451,14 +457,14 @@ dri2_lookup_egl_image(struct dri_screen *screen, void *handle)
  }
  
  static __DRIimage *
@@ -1093,7 +1113,7 @@ index f8d311c..1bafc67 100644
     unsigned tex_usage;
     enum pipe_format pf;
  
-@@ -499,12 +505,10 @@ dri2_create_image_from_name(__DRIscreen *_screen,
+@@ -498,12 +504,10 @@ dri2_create_image_from_name(__DRIscreen *_screen,
     templ.depth0 = 1;
     templ.array_size = 1;
  
@@ -1108,7 +1128,7 @@ index f8d311c..1bafc67 100644
     if (!img->texture) {
        FREE(img);
        return NULL;
-@@ -519,6 +523,39 @@ dri2_create_image_from_name(__DRIscreen *_screen,
+@@ -518,6 +522,39 @@ dri2_create_image_from_name(__DRIscreen *_screen,
  }
  
  static __DRIimage *
@@ -1148,7 +1168,7 @@ index f8d311c..1bafc67 100644
  dri2_create_image_from_renderbuffer(__DRIcontext *context,
  				    int renderbuffer, void *loaderPrivate)
  {
-@@ -610,6 +647,7 @@ dri2_query_image(__DRIimage *image, int attrib, int *value)
+@@ -609,6 +646,7 @@ dri2_query_image(__DRIimage *image, int attrib, int *value)
  
     switch (attrib) {
     case __DRI_IMAGE_ATTRIB_STRIDE:
@@ -1156,7 +1176,7 @@ index f8d311c..1bafc67 100644
        image->texture->screen->resource_get_handle(image->texture->screen,
              image->texture, &whandle);
        *value = whandle.stride;
-@@ -626,6 +664,11 @@ dri2_query_image(__DRIimage *image, int attrib, int *value)
+@@ -625,6 +663,11 @@ dri2_query_image(__DRIimage *image, int attrib, int *value)
           image->texture, &whandle);
        *value = whandle.handle;
        return GL_TRUE;
@@ -1168,7 +1188,7 @@ index f8d311c..1bafc67 100644
     case __DRI_IMAGE_ATTRIB_FORMAT:
        *value = image->dri_format;
        return GL_TRUE;
-@@ -749,6 +792,67 @@ dri2_from_planar(__DRIimage *image, int plane, void *loaderPrivate)
+@@ -748,6 +791,67 @@ dri2_from_planar(__DRIimage *image, int plane, void *loaderPrivate)
     return img;
  }
  
@@ -1236,7 +1256,7 @@ index f8d311c..1bafc67 100644
  static void
  dri2_destroy_image(__DRIimage *img)
  {
-@@ -757,7 +861,7 @@ dri2_destroy_image(__DRIimage *img)
+@@ -756,7 +860,7 @@ dri2_destroy_image(__DRIimage *img)
  }
  
  static struct __DRIimageExtensionRec dri2ImageExtension = {
@@ -1245,7 +1265,7 @@ index f8d311c..1bafc67 100644
      dri2_create_image_from_name,
      dri2_create_image_from_renderbuffer,
      dri2_destroy_image,
-@@ -767,6 +871,8 @@ static struct __DRIimageExtensionRec dri2ImageExtension = {
+@@ -766,6 +870,8 @@ static struct __DRIimageExtensionRec dri2ImageExtension = {
      dri2_validate_usage,
      dri2_from_names,
      dri2_from_planar,
@@ -1254,7 +1274,7 @@ index f8d311c..1bafc67 100644
  };
  
  /*
-@@ -813,6 +919,12 @@ dri2_init_screen(__DRIscreen * sPriv)
+@@ -812,6 +918,12 @@ dri2_init_screen(__DRIscreen * sPriv)
        screen->default_throttle_frames = throttle_ret->val.val_int;
     }
  
@@ -1268,10 +1288,10 @@ index f8d311c..1bafc67 100644
  
     /* dri_init_screen_helper checks pscreen for us */
 diff --git a/src/gallium/state_trackers/egl/common/native_helper.c b/src/gallium/state_trackers/egl/common/native_helper.c
-index 99259b8..eda6668 100644
+index b578a8a..d1e1acd 100644
 --- a/src/gallium/state_trackers/egl/common/native_helper.c
 +++ b/src/gallium/state_trackers/egl/common/native_helper.c
-@@ -428,6 +428,7 @@ drm_display_import_native_buffer(struct native_display *ndpy,
+@@ -427,6 +427,7 @@ drm_display_import_native_buffer(struct native_display *ndpy,
  
           memset(&wsh, 0, sizeof(wsh));
           wsh.handle = nbuf->u.drm.name;
@@ -1280,10 +1300,10 @@ index 99259b8..eda6668 100644
  
           res = screen->resource_from_handle(screen, &nbuf->u.drm.templ, &wsh);
 diff --git a/src/gallium/state_trackers/egl/x11/native_dri2.c b/src/gallium/state_trackers/egl/x11/native_dri2.c
-index fc18a4c..673e3d7 100644
+index 053044a..e1ec459 100644
 --- a/src/gallium/state_trackers/egl/x11/native_dri2.c
 +++ b/src/gallium/state_trackers/egl/x11/native_dri2.c
-@@ -177,6 +177,7 @@ dri2_surface_process_drawable_buffers(struct native_surface *nsurf,
+@@ -176,6 +176,7 @@ dri2_surface_process_drawable_buffers(struct native_surface *nsurf,
        }
  
        memset(&whandle, 0, sizeof(whandle));
@@ -1311,7 +1331,7 @@ index ac66af3..38e0619 100644
        return NULL;
  
 diff --git a/src/gallium/winsys/radeon/drm/radeon_drm_bo.c b/src/gallium/winsys/radeon/drm/radeon_drm_bo.c
-index 6ec1713..0a06e6b 100644
+index bcd4b27..b87ba69 100644
 --- a/src/gallium/winsys/radeon/drm/radeon_drm_bo.c
 +++ b/src/gallium/winsys/radeon/drm/radeon_drm_bo.c
 @@ -40,6 +40,7 @@
@@ -1494,10 +1514,10 @@ index 6ec1713..0a06e6b 100644
  
      whandle->stride = stride;
 diff --git a/src/gallium/winsys/radeon/drm/radeon_drm_winsys.c b/src/gallium/winsys/radeon/drm/radeon_drm_winsys.c
-index f6877d5..412d280 100644
+index ee4dfa1..fe93f6b 100644
 --- a/src/gallium/winsys/radeon/drm/radeon_drm_winsys.c
 +++ b/src/gallium/winsys/radeon/drm/radeon_drm_winsys.c
-@@ -340,6 +340,10 @@ static boolean do_winsys_init(struct radeon_drm_winsys *ws)
+@@ -341,6 +341,10 @@ static boolean do_winsys_init(struct radeon_drm_winsys *ws)
              ws->info.has_uvd = value;
      }
  
@@ -1509,10 +1529,10 @@ index f6877d5..412d280 100644
      retval = drmCommandWriteRead(ws->fd, DRM_RADEON_GEM_INFO,
              &gem_info, sizeof(gem_info));
 diff --git a/src/gallium/winsys/radeon/drm/radeon_winsys.h b/src/gallium/winsys/radeon/drm/radeon_winsys.h
-index a37bd12..60cef3c 100644
+index d0f16e1..904867c 100644
 --- a/src/gallium/winsys/radeon/drm/radeon_winsys.h
 +++ b/src/gallium/winsys/radeon/drm/radeon_winsys.h
-@@ -178,6 +178,8 @@ struct radeon_info {
+@@ -179,6 +179,8 @@ struct radeon_info {
      uint32_t                    r300_num_gb_pipes;
      uint32_t                    r300_num_z_pipes;
  
@@ -1699,10 +1719,10 @@ index a3a0530..6701b14 100644
     if (usage & GBM_BO_USE_SCANOUT)
        dri_use |= __DRI_IMAGE_USE_SCANOUT;
 diff --git a/src/mesa/drivers/dri/intel/intel_context.c b/src/mesa/drivers/dri/intel/intel_context.c
-index 0a1dd75..fbfacb7 100644
+index 09b33b1..df7a5c2 100644
 --- a/src/mesa/drivers/dri/intel/intel_context.c
 +++ b/src/mesa/drivers/dri/intel/intel_context.c
-@@ -1129,34 +1129,47 @@ intel_process_dri2_buffer(struct intel_context *intel,
+@@ -984,34 +984,47 @@ intel_process_dri2_buffer(struct intel_context *intel,
      * use of a mapping of the buffer involves a bunch of page faulting which is
      * moderately expensive.
      */
