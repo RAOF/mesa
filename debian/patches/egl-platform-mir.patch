@@ -860,12 +860,10 @@ index c9943e0..2e0dabe 100644
  #include "nouveau/nouveau_fence.h"
  #include "nv30_screen.h"
  #include "nv30_context.h"
-@@ -125,12 +127,16 @@ nv30_screen_get_param(struct pipe_screen *pscreen, enum pipe_cap param)
+@@ -125,11 +127,14 @@ nv30_screen_get_param(struct pipe_screen *pscreen, enum pipe_cap param)
     case PIPE_CAP_QUERY_PIPELINE_STATISTICS:
     case PIPE_CAP_TEXTURE_BORDER_COLOR_QUIRK:
     case PIPE_CAP_MAX_TEXTURE_BUFFER_SIZE:
-+   case PIPE_CAP_PRIME:
-       return 0;
     case PIPE_CAP_VERTEX_BUFFER_OFFSET_4BYTE_ALIGNED_ONLY:
     case PIPE_CAP_VERTEX_BUFFER_STRIDE_4BYTE_ALIGNED_ONLY:
     case PIPE_CAP_VERTEX_ELEMENT_SRC_OFFSET_4BYTE_ALIGNED_ONLY:
@@ -936,11 +934,10 @@ index e58916b..0bb7d00 100644
  #include "r300_context.h"
  #include "r300_texture.h"
  #include "r300_screen_buffer.h"
-@@ -164,6 +166,7 @@ static int r300_get_param(struct pipe_screen* pscreen, enum pipe_cap param)
+@@ -164,6 +166,6 @@ static int r300_get_param(struct pipe_screen* pscreen, enum pipe_cap param)
          case PIPE_CAP_TEXTURE_BUFFER_OFFSET_ALIGNMENT:
          case PIPE_CAP_TEXTURE_BORDER_COLOR_QUIRK:
          case PIPE_CAP_MAX_TEXTURE_BUFFER_SIZE:
-+        case PIPE_CAP_PRIME:
              return 0;
  
          /* SWTCL-only features. */
@@ -991,11 +988,10 @@ index 382311f..a3d5b12 100644
  #include <stdio.h>
  #include <errno.h>
  #include "pipe/p_defines.h"
-@@ -384,6 +385,7 @@ static int r600_get_param(struct pipe_screen* pscreen, enum pipe_cap param)
+@@ -384,6 +385,6 @@ static int r600_get_param(struct pipe_screen* pscreen, enum pipe_cap param)
  	case PIPE_CAP_TEXTURE_BUFFER_OFFSET_ALIGNMENT:
  	case PIPE_CAP_TEXTURE_BORDER_COLOR_QUIRK:
          case PIPE_CAP_MAX_TEXTURE_BUFFER_SIZE:
-+	case PIPE_CAP_PRIME:
  		return 0;
  
  	/* Stream output. */
