@@ -1,3 +1,10 @@
+mesa (9.2~git20130611.761320b1-0ubuntu0+mir1) saucy; urgency=low
+
+  * New upstream snapshot
+  * Rebuild against split-out Wayland libs to fix installability
+
+ -- Christopher James Halse Rogers <raof@ubuntu.com>  Tue, 11 Jun 2013 15:12:28 +1000
+
 mesa (9.2~git20130515.392f6cfc-0ubuntu0+mir1) saucy; urgency=low
 
   * Update to new upstream snapshot
