@@ -5,5 +5,4 @@
 08-kfreebsd-gallium.diff
 10-hurd-configure-tweaks.diff
 #11-hurd-ftbfs-again.diff
-14-fix-osmesa-build.diff
 egl-platform-mir.patch
