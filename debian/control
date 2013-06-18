@@ -34,7 +34,7 @@ Build-Depends:
  bison,
  llvm-3.2-dev [amd64 i386 kfreebsd-amd64 kfreebsd-i386],
  libwayland-dev (>= 1.0.2) [linux-any],
- libmirclient-dev (>= 0.4),
+ libmirclient-dev (>= 0.0.4),
 Vcs-Git: git://git.debian.org/git/pkg-xorg/lib/mesa
 Vcs-Browser: http://git.debian.org/?p=pkg-xorg/lib/mesa.git
 Homepage: http://mesa3d.sourceforge.net/
