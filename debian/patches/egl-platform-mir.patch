@@ -1,8 +1,8 @@
-Index: mesa/configure.ac
-===================================================================
---- mesa.orig/configure.ac	2013-06-11 15:55:49.921553273 +1000
-+++ mesa/configure.ac	2013-06-11 15:55:49.893553275 +1000
-@@ -1451,7 +1451,9 @@
+diff --git a/configure.ac b/configure.ac
+index 6832b0d..4be9efc 100644
+--- a/configure.ac
++++ b/configure.ac
+@@ -1451,7 +1451,9 @@ for plat in $egl_platforms; do
  
  	android|fbdev|gdi|null)
  		;;
@@ -13,7 +13,7 @@ Index: mesa/configure.ac
  	*)
  		AC_MSG_ERROR([EGL platform '$plat' does not exist])
  		;;
-@@ -1482,6 +1484,7 @@
+@@ -1482,6 +1484,7 @@ AM_CONDITIONAL(HAVE_EGL_PLATFORM_WAYLAND, echo "$egl_platforms" | grep 'wayland'
  AM_CONDITIONAL(HAVE_EGL_PLATFORM_DRM, echo "$egl_platforms" | grep 'drm' >/dev/null 2>&1)
  AM_CONDITIONAL(HAVE_EGL_PLATFORM_FBDEV, echo "$egl_platforms" | grep 'fbdev' >/dev/null 2>&1)
  AM_CONDITIONAL(HAVE_EGL_PLATFORM_NULL, echo "$egl_platforms" | grep 'null' >/dev/null 2>&1)
@@ -21,11 +21,11 @@ Index: mesa/configure.ac
  
  AM_CONDITIONAL(HAVE_EGL_DRIVER_DRI2, test "x$HAVE_EGL_DRIVER_DRI2" != "x")
  AM_CONDITIONAL(HAVE_EGL_DRIVER_GLX, test "x$HAVE_EGL_DRIVER_GLX" != "x")
-Index: mesa/include/EGL/eglplatform.h
-===================================================================
---- mesa.orig/include/EGL/eglplatform.h	2013-06-11 15:55:49.921553273 +1000
-+++ mesa/include/EGL/eglplatform.h	2013-06-11 15:55:49.893553275 +1000
-@@ -104,6 +104,13 @@
+diff --git a/include/EGL/eglplatform.h b/include/EGL/eglplatform.h
+index 17fdc61..ae2d837 100644
+--- a/include/EGL/eglplatform.h
++++ b/include/EGL/eglplatform.h
+@@ -104,6 +104,13 @@ typedef struct ANativeWindow        *EGLNativeWindowType;
  typedef struct egl_native_pixmap_t  *EGLNativePixmapType;
  typedef void                        *EGLNativeDisplayType;
  
@@ -39,11 +39,11 @@ Index: mesa/include/EGL/eglplatform.h
  #elif defined(__unix__)
  
  #ifdef MESA_EGL_NO_X11_HEADERS
-Index: mesa/include/GL/internal/dri_interface.h
-===================================================================
---- mesa.orig/include/GL/internal/dri_interface.h	2013-06-11 15:55:49.921553273 +1000
-+++ mesa/include/GL/internal/dri_interface.h	2013-06-11 15:55:49.893553275 +1000
-@@ -766,10 +766,12 @@
+diff --git a/include/GL/internal/dri_interface.h b/include/GL/internal/dri_interface.h
+index 30ce175..4855742 100644
+--- a/include/GL/internal/dri_interface.h
++++ b/include/GL/internal/dri_interface.h
+@@ -766,10 +766,12 @@ struct __DRIbufferRec {
      unsigned int pitch;
      unsigned int cpp;
      unsigned int flags;
@@ -57,11 +57,11 @@ Index: mesa/include/GL/internal/dri_interface.h
  struct __DRIdri2LoaderExtensionRec {
      __DRIextension base;
  
-Index: mesa/src/egl/drivers/dri2/Makefile.am
-===================================================================
---- mesa.orig/src/egl/drivers/dri2/Makefile.am	2013-06-11 15:55:49.921553273 +1000
-+++ mesa/src/egl/drivers/dri2/Makefile.am	2013-06-11 15:55:49.897553275 +1000
-@@ -62,3 +62,9 @@
+diff --git a/src/egl/drivers/dri2/Makefile.am b/src/egl/drivers/dri2/Makefile.am
+index 45f7dfa..dfb0c05 100644
+--- a/src/egl/drivers/dri2/Makefile.am
++++ b/src/egl/drivers/dri2/Makefile.am
+@@ -62,3 +62,9 @@ if HAVE_EGL_PLATFORM_DRM
  libegl_dri2_la_SOURCES += platform_drm.c
  AM_CFLAGS += -DHAVE_DRM_PLATFORM
  endif
@@ -71,11 +71,11 @@ Index: mesa/src/egl/drivers/dri2/Makefile.am
 +AM_CFLAGS += -DHAVE_MIR_PLATFORM
 +AM_CFLAGS += $(MIR_CFLAGS)
 +endif
-Index: mesa/src/egl/drivers/dri2/egl_dri2.c
-===================================================================
---- mesa.orig/src/egl/drivers/dri2/egl_dri2.c	2013-06-11 15:55:49.921553273 +1000
-+++ mesa/src/egl/drivers/dri2/egl_dri2.c	2013-06-11 15:55:49.897553275 +1000
-@@ -599,6 +599,12 @@
+diff --git a/src/egl/drivers/dri2/egl_dri2.c b/src/egl/drivers/dri2/egl_dri2.c
+index 1bce314..b867391 100644
+--- a/src/egl/drivers/dri2/egl_dri2.c
++++ b/src/egl/drivers/dri2/egl_dri2.c
+@@ -599,6 +599,12 @@ dri2_initialize(_EGLDriver *drv, _EGLDisplay *disp)
           return EGL_TRUE;
        return dri2_initialize_wayland(drv, disp);
  #endif
@@ -88,10 +88,10 @@ Index: mesa/src/egl/drivers/dri2/egl_dri2.c
  #endif
  #ifdef HAVE_ANDROID_PLATFORM
     case _EGL_PLATFORM_ANDROID:
-Index: mesa/src/egl/drivers/dri2/egl_dri2.h
-===================================================================
---- mesa.orig/src/egl/drivers/dri2/egl_dri2.h	2013-06-11 15:55:49.921553273 +1000
-+++ mesa/src/egl/drivers/dri2/egl_dri2.h	2013-06-11 15:55:49.897553275 +1000
+diff --git a/src/egl/drivers/dri2/egl_dri2.h b/src/egl/drivers/dri2/egl_dri2.h
+index 6dfdf94..668480c 100644
+--- a/src/egl/drivers/dri2/egl_dri2.h
++++ b/src/egl/drivers/dri2/egl_dri2.h
 @@ -65,6 +65,11 @@
  
  #endif /* HAVE_ANDROID_PLATFORM */
@@ -104,7 +104,7 @@ Index: mesa/src/egl/drivers/dri2/egl_dri2.h
  #include "eglconfig.h"
  #include "eglcontext.h"
  #include "egldisplay.h"
-@@ -135,6 +140,10 @@
+@@ -135,6 +140,10 @@ struct dri2_egl_display
     uint32_t                  capabilities;
  #endif
  
@@ -115,7 +115,7 @@ Index: mesa/src/egl/drivers/dri2/egl_dri2.h
     int (*authenticate) (_EGLDisplay *disp, uint32_t id);
  };
  
-@@ -183,7 +192,9 @@
+@@ -183,7 +192,9 @@ struct dri2_egl_surface
     struct gbm_dri_surface *gbm_surf;
  #endif
  
@@ -126,20 +126,18 @@ Index: mesa/src/egl/drivers/dri2/egl_dri2.h
     __DRIbuffer           *dri_buffers[__DRI_BUFFER_COUNT];
     struct {
  #ifdef HAVE_WAYLAND_PLATFORM
-@@ -206,6 +217,12 @@
+@@ -206,6 +217,10 @@ struct dri2_egl_surface
     /* EGL-owned buffers */
     __DRIbuffer           *local_buffers[__DRI_BUFFER_COUNT];
  #endif
 +
 +#ifdef HAVE_MIR_PLATFORM
-+   MirSurface            *mir_surf;
-+   // TODO: Awkward to copy
-+   MirMesaEGLNativeDisplay *mir_disp;
++   MirMesaEGLNativeSurface *mir_surf;
 +#endif
  };
  
  
-@@ -267,6 +284,9 @@
+@@ -267,6 +282,9 @@ dri2_initialize_wayland(_EGLDriver *drv, _EGLDisplay *disp);
  EGLBoolean
  dri2_initialize_android(_EGLDriver *drv, _EGLDisplay *disp);
  
@@ -149,11 +147,12 @@ Index: mesa/src/egl/drivers/dri2/egl_dri2.h
  char *
  dri2_get_driver_for_fd(int fd);
  char *
-Index: mesa/src/egl/drivers/dri2/platform_mir.c
-===================================================================
---- /dev/null	1970-01-01 00:00:00.000000000 +0000
-+++ mesa/src/egl/drivers/dri2/platform_mir.c	2013-06-11 15:55:49.897553275 +1000
-@@ -0,0 +1,362 @@
+diff --git a/src/egl/drivers/dri2/platform_mir.c b/src/egl/drivers/dri2/platform_mir.c
+new file mode 100644
+index 0000000..6086be1
+--- /dev/null
++++ b/src/egl/drivers/dri2/platform_mir.c
+@@ -0,0 +1,349 @@
 +/*
 + * Copyright © 2012 Canonical, Inc
 + *
@@ -181,7 +180,6 @@ Index: mesa/src/egl/drivers/dri2/platform_mir.c
 + *    Christopher James Halse Rogers <christopher.halse.rogers@canonical.com>
 + */
 +
-+#include <mir_toolkit/mir_client_library.h>
 +#include <mir_toolkit/mesa/native_display.h>
 +
 +#include "egl_dri2.h"
@@ -289,13 +287,13 @@ Index: mesa/src/egl/drivers/dri2/platform_mir.c
 +#endif
 +}
 +
-+static void
-+mir_populate_colour_buffers(struct dri2_egl_surface *surf)
++static EGLBoolean 
++mir_advance_colour_buffer(struct dri2_egl_surface *surf)
 +{
 +   MirBufferPackage buffer_package;
-+   surf->mir_disp->surface_get_current_buffer(surf->mir_disp,
-+                                              (EGLNativeWindowType)surf->mir_surf,
-+                                              &buffer_package);
++   if(!surf->mir_surf->surface_advance_buffer(surf->mir_surf, &buffer_package))
++      return EGL_FALSE;
++
 +   /* We expect no data items, and (for the moment) one PRIME fd */
 +   assert(buffer_package.data_items == 0);
 +   assert(buffer_package.fd_items == 1);
@@ -303,6 +301,7 @@ Index: mesa/src/egl/drivers/dri2/platform_mir.c
 +   surf->dri_buffers[__DRI_BUFFER_BACK_LEFT]->name = 0;
 +   surf->dri_buffers[__DRI_BUFFER_BACK_LEFT]->fd = buffer_package.fd[0];
 +   surf->dri_buffers[__DRI_BUFFER_BACK_LEFT]->pitch = buffer_package.stride;
++   return EGL_TRUE;
 +}
 +
 +/**
@@ -313,6 +312,7 @@ Index: mesa/src/egl/drivers/dri2/platform_mir.c
 +                               _EGLConfig *conf, EGLNativeWindowType window,
 +                               const EGLint *attrib_list)
 +{
++   int rc;
 +   struct dri2_egl_display *dri2_dpy = dri2_egl_display(disp);
 +   struct dri2_egl_config *dri2_conf = dri2_egl_config(conf);
 +   struct dri2_egl_surface *dri2_surf;
@@ -329,11 +329,10 @@ Index: mesa/src/egl/drivers/dri2/platform_mir.c
 +   if (!_eglInitSurface(&dri2_surf->base, disp, EGL_WINDOW_BIT, conf, attrib_list))
 +      goto cleanup_surf;
 +
-+   // TODO: Strange to copy this...
-+   dri2_surf->mir_disp = dri2_dpy->mir_disp;
-+   dri2_surf->mir_surf = (MirSurface *)window;
-+   dri2_surf->mir_disp->surface_get_parameters(dri2_surf->mir_disp, (EGLNativeWindowType)dri2_surf->mir_surf,
-+                                               &surf_params);
++   dri2_surf->mir_surf = window;
++   if (!dri2_surf->mir_surf->surface_get_parameters(dri2_surf->mir_surf, &surf_params))
++      goto cleanup_surf;
++
 +   dri2_surf->base.Width = surf_params.width;
 +   dri2_surf->base.Height = surf_params.height;
 +
@@ -347,7 +346,8 @@ Index: mesa/src/egl/drivers/dri2/platform_mir.c
 +   /* We only do ARGB 8888 for the moment */
 +   dri2_surf->dri_buffers[__DRI_BUFFER_BACK_LEFT]->cpp = 4;
 +
-+   mir_populate_colour_buffers(dri2_surf);
++   if(!mir_advance_colour_buffer(dri2_surf))
++      goto cleanup_surf;
 +
 +   dri2_surf->dri_drawable = 
 +      (*dri2_dpy->dri2->createNewDrawable) (dri2_dpy->dri_screen,
@@ -357,7 +357,7 @@ Index: mesa/src/egl/drivers/dri2/platform_mir.c
 +   if (dri2_surf->dri_drawable == NULL) {
 +      _eglError(EGL_BAD_ALLOC, "dri2->createNewDrawable");
 +   }
-+   
++
 +   return &dri2_surf->base;
 +
 +cleanup_surf:
@@ -393,6 +393,19 @@ Index: mesa/src/egl/drivers/dri2/platform_mir.c
 +}
 +
 +/**
++ * Called via eglSwapInterval(), drv->API.SwapInterval().
++ */
++static EGLBoolean
++dri2_set_swap_interval(_EGLDriver *drv, _EGLDisplay *disp,
++                       _EGLSurface *surf, EGLint interval)
++{
++   struct dri2_egl_surface *dri2_surf = dri2_egl_surface(surf);
++   if(!dri2_surf->mir_surf->surface_set_swapinterval(dri2_surf->mir_surf, interval))
++      return EGL_FALSE;
++   return EGL_TRUE;
++}
++
++/**
 + * Called via eglSwapBuffers(), drv->API.SwapBuffers().
 + */
 +static EGLBoolean
@@ -402,22 +415,13 @@ Index: mesa/src/egl/drivers/dri2/platform_mir.c
 +   struct dri2_egl_surface *dri2_surf = dri2_egl_surface(draw);
 +   struct dri2_egl_driver *dri2_drv = dri2_egl_driver(drv);
 +
-+   dri2_surf->mir_disp->surface_advance_buffer(dri2_surf->mir_disp, (EGLNativeWindowType)dri2_surf->mir_surf);
-+
 +   (*dri2_dpy->flush->flush)(dri2_surf->dri_drawable);
 +
-+   mir_populate_colour_buffers(dri2_surf);
++   int rc = mir_advance_colour_buffer(dri2_surf);
 +
 +   (*dri2_dpy->flush->invalidate)(dri2_surf->dri_drawable);
 +
-+   return EGL_TRUE;
-+}
-+
-+static void connection_callback(MirConnection *conn, void *context)
-+{
-+   struct dri2_egl_display *dri2_dpy = context;
-+
-+   dri2_dpy->mir_disp = (MirMesaEGLNativeDisplay *)mir_connection_get_egl_native_display(conn);
++   return rc;
 +}
 +
 +static int
@@ -440,11 +444,11 @@ Index: mesa/src/egl/drivers/dri2/platform_mir.c
 +   drv->API.CreateWindowSurface = dri2_create_mir_window_surface;
 +   drv->API.DestroySurface = dri2_destroy_mir_surface;
 +   drv->API.SwapBuffers = dri2_swap_buffers;
++   drv->API.SwapInterval = dri2_set_swap_interval;
 +/*   drv->API.CreatePixmapSurface = dri2_create_pixmap_surface;
 +   drv->API.CreatePbufferSurface = dri2_create_pbuffer_surface;
 +   drv->API.CopyBuffers = dri2_copy_buffers;
 +   drv->API.CreateImageKHR = dri2_x11_create_image_khr;
-+   drv->API.SwapInterval = dri2_swap_interval;
 +*/
 +
 +   dri2_dpy = calloc(1, sizeof *dri2_dpy);
@@ -452,21 +456,7 @@ Index: mesa/src/egl/drivers/dri2/platform_mir.c
 +      return _eglError(EGL_BAD_ALLOC, "eglInitialize");
 +
 +   disp->DriverData = (void *) dri2_dpy;
-+   if (disp->PlatformDisplay == NULL) {
-+      mir_wait_for(mir_connect("some_socket_file", "EGL Client",
-+                               connection_callback, dri2_dpy));
-+   } else {
-+      dri2_dpy->mir_disp = (MirConnection *)disp->PlatformDisplay;
-+   }
-+
-+
-+// TODO: What to do about mir_connection_is_valid?
-+//   if (!mir_connection_is_valid(dri2_dpy->mir_conn)) {
-+//      _eglLog(_EGL_WARNING, "DRI2: mir_connect failed: %s",
-+//              mir_connection_get_error_message(dri2_dpy->mir_conn));
-+//      goto cleanup_dpy;
-+//   }
-+
++   dri2_dpy->mir_disp = disp->PlatformDisplay;
 +   dri2_dpy->mir_disp->display_get_platform(dri2_dpy->mir_disp, &platform);
 +   dri2_dpy->fd = platform.fd[0];
 +   dri2_dpy->driver_name = dri2_get_driver_for_fd(dri2_dpy->fd);
@@ -474,10 +464,10 @@ Index: mesa/src/egl/drivers/dri2/platform_mir.c
 +
 +   if (dri2_dpy->driver_name == NULL ||
 +       dri2_dpy->device_name == NULL)
-+      goto cleanup_conn;
++      goto cleanup_dpy;
 +
 +   if (!dri2_load_driver(disp))
-+      goto cleanup_conn;
++      goto cleanup_dpy;
 +
 +   dri2_dpy->dri2_loader_extension.base.name = __DRI_DRI2_LOADER;
 +   dri2_dpy->dri2_loader_extension.base.version = 4;
@@ -492,7 +482,7 @@ Index: mesa/src/egl/drivers/dri2/platform_mir.c
 +   dri2_dpy->extensions[3] = NULL;
 +
 +   if (!dri2_create_screen(disp))
-+      goto cleanup_conn;
++      goto cleanup_dpy;
 +
 +   types = EGL_WINDOW_BIT;
 +   for (i = 0; dri2_dpy->driver_configs[i]; i++) {
@@ -507,20 +497,16 @@ Index: mesa/src/egl/drivers/dri2/platform_mir.c
 +
 +   return EGL_TRUE;
 +
-+ cleanup_conn:
-+   // TODO: Release NativeDisplay...
-+//   if (disp->PlatformDisplay == NULL)
-+//      mir_connection_release(dri2_dpy->mir_conn);
 + cleanup_dpy:
 +   free(dri2_dpy);
 +
 +   return EGL_FALSE;
 +}
-Index: mesa/src/egl/main/Makefile.am
-===================================================================
---- mesa.orig/src/egl/main/Makefile.am	2013-06-11 15:55:49.921553273 +1000
-+++ mesa/src/egl/main/Makefile.am	2013-06-11 15:55:49.897553275 +1000
-@@ -103,6 +103,12 @@
+diff --git a/src/egl/main/Makefile.am b/src/egl/main/Makefile.am
+index ca5257a..64af1fd 100644
+--- a/src/egl/main/Makefile.am
++++ b/src/egl/main/Makefile.am
+@@ -103,6 +103,12 @@ if HAVE_EGL_PLATFORM_NULL
  AM_CFLAGS += -DHAVE_NULL_PLATFORM
  endif
  
@@ -533,10 +519,10 @@ Index: mesa/src/egl/main/Makefile.am
  if HAVE_EGL_DRIVER_GLX
  AM_CFLAGS += -D_EGL_BUILT_IN_DRIVER_GLX
  libEGL_la_LIBADD += ../drivers/glx/libegl_glx.la
-Index: mesa/src/egl/main/egldisplay.c
-===================================================================
---- mesa.orig/src/egl/main/egldisplay.c	2013-06-11 15:55:49.921553273 +1000
-+++ mesa/src/egl/main/egldisplay.c	2013-06-11 15:55:49.897553275 +1000
+diff --git a/src/egl/main/egldisplay.c b/src/egl/main/egldisplay.c
+index 985e781..feb2ae2 100644
+--- a/src/egl/main/egldisplay.c
++++ b/src/egl/main/egldisplay.c
 @@ -59,7 +59,9 @@
  #include <sys/types.h>
  #include <sys/stat.h>
@@ -548,7 +534,7 @@ Index: mesa/src/egl/main/egldisplay.c
  
  /**
   * Map --with-egl-platforms names to platform types.
-@@ -74,7 +76,8 @@
+@@ -74,7 +76,8 @@ static const struct {
     { _EGL_PLATFORM_DRM, "drm" },
     { _EGL_PLATFORM_FBDEV, "fbdev" },
     { _EGL_PLATFORM_NULL, "null" },
@@ -558,7 +544,7 @@ Index: mesa/src/egl/main/egldisplay.c
  };
  
  
-@@ -154,6 +157,11 @@
+@@ -154,6 +157,11 @@ _eglNativePlatformDetectNativeDisplay(EGLNativeDisplayType nativeDisplay)
        return _EGL_PLATFORM_FBDEV;
  #endif
  
@@ -570,7 +556,7 @@ Index: mesa/src/egl/main/egldisplay.c
     if (_eglPointerIsDereferencable(nativeDisplay)) {
        void *first_pointer = *(void **) nativeDisplay;
  
-@@ -188,7 +196,7 @@
+@@ -188,7 +196,7 @@ _eglNativePlatformDetectNativeDisplay(EGLNativeDisplayType nativeDisplay)
  _EGLPlatformType
  _eglGetNativePlatform(EGLNativeDisplayType nativeDisplay)
  {
@@ -579,11 +565,11 @@ Index: mesa/src/egl/main/egldisplay.c
     char *detection_method = NULL;
  
     if (native_platform == _EGL_INVALID_PLATFORM) {
-Index: mesa/src/egl/main/egldisplay.h
-===================================================================
---- mesa.orig/src/egl/main/egldisplay.h	2013-06-11 15:55:49.921553273 +1000
-+++ mesa/src/egl/main/egldisplay.h	2013-06-11 15:55:49.901553275 +1000
-@@ -46,6 +46,7 @@
+diff --git a/src/egl/main/egldisplay.h b/src/egl/main/egldisplay.h
+index f990300..59eb30c 100644
+--- a/src/egl/main/egldisplay.h
++++ b/src/egl/main/egldisplay.h
+@@ -46,6 +46,7 @@ enum _egl_platform_type {
     _EGL_PLATFORM_FBDEV,
     _EGL_PLATFORM_NULL,
     _EGL_PLATFORM_ANDROID,
@@ -591,11 +577,11 @@ Index: mesa/src/egl/main/egldisplay.h
  
     _EGL_NUM_PLATFORMS,
     _EGL_INVALID_PLATFORM = -1
-Index: mesa/src/egl/main/egldriver.c
-===================================================================
---- mesa.orig/src/egl/main/egldriver.c	2013-06-11 15:55:49.921553273 +1000
-+++ mesa/src/egl/main/egldriver.c	2013-06-11 15:55:49.901553275 +1000
-@@ -57,7 +57,7 @@
+diff --git a/src/egl/main/egldriver.c b/src/egl/main/egldriver.c
+index ffdd146..e4c9859 100644
+--- a/src/egl/main/egldriver.c
++++ b/src/egl/main/egldriver.c
+@@ -57,7 +57,7 @@ typedef struct _egl_module {
     char *Path;
     _EGLMain_t BuiltIn;
     void *Handle;
@@ -604,7 +590,7 @@ Index: mesa/src/egl/main/egldriver.c
  } _EGLModule;
  
  static _EGL_DECLARE_MUTEX(_eglModuleMutex);
-@@ -134,7 +134,6 @@
+@@ -134,7 +134,6 @@ library_suffix(void)
  
  #endif
  
@@ -612,7 +598,7 @@ Index: mesa/src/egl/main/egldriver.c
  /**
   * Open the named driver and find its bootstrap function: _eglMain().
   */
-@@ -147,8 +146,12 @@
+@@ -147,8 +146,12 @@ _eglOpenLibrary(const char *driverPath, lib_handle *handle)
  
     assert(driverPath);
  
@@ -627,7 +613,7 @@ Index: mesa/src/egl/main/egldriver.c
  
  #if defined(_EGL_OS_WINDOWS)
     /* XXX untested */
-@@ -194,13 +197,13 @@
+@@ -194,13 +197,13 @@ _eglOpenLibrary(const char *driverPath, lib_handle *handle)
   * Load a module and create the driver object.
   */
  static EGLBoolean
@@ -644,7 +630,7 @@ Index: mesa/src/egl/main/egldriver.c
        return EGL_TRUE;
  
     if (mod->BuiltIn) {
-@@ -226,7 +229,7 @@
+@@ -226,7 +229,7 @@ _eglLoadModule(_EGLModule *mod)
     }
  
     mod->Handle = (void *) lib;
@@ -653,7 +639,7 @@ Index: mesa/src/egl/main/egldriver.c
  
     return EGL_TRUE;
  }
-@@ -240,8 +243,10 @@
+@@ -240,8 +243,10 @@ _eglUnloadModule(_EGLModule *mod)
  {
  #if defined(_EGL_OS_UNIX)
     /* destroy the driver */
@@ -666,7 +652,7 @@ Index: mesa/src/egl/main/egldriver.c
  
     /*
      * XXX At this point (atexit), the module might be the last reference to
-@@ -255,7 +260,9 @@
+@@ -255,7 +260,9 @@ _eglUnloadModule(_EGLModule *mod)
     /* XXX Windows unloads DLLs before atexit */
  #endif
  
@@ -677,7 +663,7 @@ Index: mesa/src/egl/main/egldriver.c
     mod->Handle = NULL;
  }
  
-@@ -599,17 +606,17 @@
+@@ -599,17 +606,17 @@ _eglMatchAndInitialize(_EGLDisplay *dpy)
     while (i < _eglModules->Size) {
        _EGLModule *mod = (_EGLModule *) _eglModules->Elements[i];
  
@@ -699,7 +685,7 @@ Index: mesa/src/egl/main/egldriver.c
           i++;
        }
     }
-@@ -661,7 +668,6 @@
+@@ -661,7 +668,6 @@ __eglMustCastToProperFunctionPointerType
  _eglGetDriverProc(const char *procname)
  {
     EGLint i;
@@ -707,17 +693,18 @@ Index: mesa/src/egl/main/egldriver.c
  
     if (!_eglModules) {
        /* load the driver for the default display */
-@@ -673,15 +679,18 @@
+@@ -673,15 +679,18 @@ _eglGetDriverProc(const char *procname)
  
     for (i = 0; i < _eglModules->Size; i++) {
        _EGLModule *mod = (_EGLModule *) _eglModules->Elements[i];
-+      _EGLProc proc;
- 
+-
 -      if (!mod->Driver)
 -         break;
 -      proc = mod->Driver->API.GetProcAddress(mod->Driver, procname);
 -      if (proc)
 -         break;
++      _EGLProc proc;
++
 +      for (_EGLPlatformType plat = 0; plat < _EGL_NUM_PLATFORMS; ++plat) {
 +         if (!mod->Driver[plat])
 +            continue;
@@ -732,11 +719,11 @@ Index: mesa/src/egl/main/egldriver.c
  }
  
  
-Index: mesa/src/gallium/drivers/freedreno/freedreno_screen.c
-===================================================================
---- mesa.orig/src/gallium/drivers/freedreno/freedreno_screen.c	2013-06-11 15:55:49.921553273 +1000
-+++ mesa/src/gallium/drivers/freedreno/freedreno_screen.c	2013-06-11 15:55:49.901553275 +1000
-@@ -193,6 +193,7 @@
+diff --git a/src/gallium/drivers/freedreno/freedreno_screen.c b/src/gallium/drivers/freedreno/freedreno_screen.c
+index f88fa08..6a5095c 100644
+--- a/src/gallium/drivers/freedreno/freedreno_screen.c
++++ b/src/gallium/drivers/freedreno/freedreno_screen.c
+@@ -193,6 +193,7 @@ fd_screen_get_param(struct pipe_screen *pscreen, enum pipe_cap param)
  	case PIPE_CAP_USER_INDEX_BUFFERS:
  	case PIPE_CAP_QUERY_PIPELINE_STATISTICS:
  	case PIPE_CAP_TEXTURE_BORDER_COLOR_QUIRK:
@@ -744,7 +731,7 @@ Index: mesa/src/gallium/drivers/freedreno/freedreno_screen.c
  		return 0;
  
  	/* Stream output. */
-@@ -346,6 +347,11 @@
+@@ -346,6 +347,11 @@ fd_screen_bo_from_handle(struct pipe_screen *pscreen,
  	struct fd_screen *screen = fd_screen(pscreen);
  	struct fd_bo *bo;
  
@@ -756,11 +743,11 @@ Index: mesa/src/gallium/drivers/freedreno/freedreno_screen.c
  	bo = fd_bo_from_name(screen->dev, whandle->handle);
  	if (!bo) {
  		DBG("ref name 0x%08x failed", whandle->handle);
-Index: mesa/src/gallium/drivers/i915/i915_screen.c
-===================================================================
---- mesa.orig/src/gallium/drivers/i915/i915_screen.c	2013-06-11 15:55:49.921553273 +1000
-+++ mesa/src/gallium/drivers/i915/i915_screen.c	2013-06-11 15:55:49.901553275 +1000
-@@ -214,6 +214,7 @@
+diff --git a/src/gallium/drivers/i915/i915_screen.c b/src/gallium/drivers/i915/i915_screen.c
+index 2d0cc78..92b650f 100644
+--- a/src/gallium/drivers/i915/i915_screen.c
++++ b/src/gallium/drivers/i915/i915_screen.c
+@@ -214,6 +214,7 @@ i915_get_param(struct pipe_screen *screen, enum pipe_cap cap)
     case PIPE_CAP_TEXTURE_MULTISAMPLE:
     case PIPE_CAP_MIN_MAP_BUFFER_ALIGNMENT:
     case PIPE_CAP_TEXTURE_BORDER_COLOR_QUIRK:
@@ -768,11 +755,11 @@ Index: mesa/src/gallium/drivers/i915/i915_screen.c
        return 0;
     case PIPE_CAP_MAX_DUAL_SOURCE_RENDER_TARGETS:
     case PIPE_CAP_STREAM_OUTPUT_PAUSE_RESUME:
-Index: mesa/src/gallium/drivers/llvmpipe/lp_screen.c
-===================================================================
---- mesa.orig/src/gallium/drivers/llvmpipe/lp_screen.c	2013-06-11 15:55:49.921553273 +1000
-+++ mesa/src/gallium/drivers/llvmpipe/lp_screen.c	2013-06-11 15:55:49.901553275 +1000
-@@ -232,6 +232,8 @@
+diff --git a/src/gallium/drivers/llvmpipe/lp_screen.c b/src/gallium/drivers/llvmpipe/lp_screen.c
+index 562fb51..6053efb 100644
+--- a/src/gallium/drivers/llvmpipe/lp_screen.c
++++ b/src/gallium/drivers/llvmpipe/lp_screen.c
+@@ -232,6 +232,8 @@ llvmpipe_get_param(struct pipe_screen *screen, enum pipe_cap param)
        return 0;
     case PIPE_CAP_MAX_VIEWPORTS:
        return PIPE_MAX_VIEWPORTS;
@@ -781,10 +768,10 @@ Index: mesa/src/gallium/drivers/llvmpipe/lp_screen.c
     }
     /* should only get here on unhandled cases */
     debug_printf("Unexpected PIPE_CAP %d query\n", param);
-Index: mesa/src/gallium/drivers/nouveau/nouveau_screen.c
-===================================================================
---- mesa.orig/src/gallium/drivers/nouveau/nouveau_screen.c	2013-06-11 15:55:49.921553273 +1000
-+++ mesa/src/gallium/drivers/nouveau/nouveau_screen.c	2013-06-11 15:55:49.901553275 +1000
+diff --git a/src/gallium/drivers/nouveau/nouveau_screen.c b/src/gallium/drivers/nouveau/nouveau_screen.c
+index d129a55..6308a91 100644
+--- a/src/gallium/drivers/nouveau/nouveau_screen.c
++++ b/src/gallium/drivers/nouveau/nouveau_screen.c
 @@ -14,6 +14,7 @@
  #include <errno.h>
  #include <stdlib.h>
@@ -793,7 +780,7 @@ Index: mesa/src/gallium/drivers/nouveau/nouveau_screen.c
  #include <libdrm/nouveau_drm.h>
  
  #include "nouveau_winsys.h"
-@@ -86,7 +87,18 @@
+@@ -86,7 +87,18 @@ nouveau_screen_bo_from_handle(struct pipe_screen *pscreen,
  	struct nouveau_bo *bo = 0;
  	int ret;
   
@@ -813,7 +800,7 @@ Index: mesa/src/gallium/drivers/nouveau/nouveau_screen.c
  	if (ret) {
  		debug_printf("%s: ref name 0x%08x failed with %d\n",
  			     __FUNCTION__, whandle->handle, ret);
-@@ -111,6 +123,8 @@
+@@ -111,6 +123,8 @@ nouveau_screen_bo_get_handle(struct pipe_screen *pscreen,
  	} else if (whandle->type == DRM_API_HANDLE_TYPE_KMS) {
  		whandle->handle = bo->handle;
  		return TRUE;
@@ -822,7 +809,7 @@ Index: mesa/src/gallium/drivers/nouveau/nouveau_screen.c
  	} else {
  		return FALSE;
  	}
-@@ -161,6 +175,9 @@
+@@ -161,6 +175,9 @@ nouveau_screen_init(struct nouveau_screen *screen, struct nouveau_device *dev)
          if (!ret)
             screen->cpu_gpu_time_delta = time - screen->cpu_gpu_time_delta * 1000;
  
@@ -832,11 +819,11 @@ Index: mesa/src/gallium/drivers/nouveau/nouveau_screen.c
  	pscreen->get_name = nouveau_screen_get_name;
  	pscreen->get_vendor = nouveau_screen_get_vendor;
  
-Index: mesa/src/gallium/drivers/nouveau/nouveau_screen.h
-===================================================================
---- mesa.orig/src/gallium/drivers/nouveau/nouveau_screen.h	2013-06-11 15:55:49.921553273 +1000
-+++ mesa/src/gallium/drivers/nouveau/nouveau_screen.h	2013-06-11 15:55:49.901553275 +1000
-@@ -47,6 +47,8 @@
+diff --git a/src/gallium/drivers/nouveau/nouveau_screen.h b/src/gallium/drivers/nouveau/nouveau_screen.h
+index 7f15d10..fc5531b 100644
+--- a/src/gallium/drivers/nouveau/nouveau_screen.h
++++ b/src/gallium/drivers/nouveau/nouveau_screen.h
+@@ -47,6 +47,8 @@ struct nouveau_screen {
  
  	int64_t cpu_gpu_time_delta;
  
@@ -845,10 +832,10 @@ Index: mesa/src/gallium/drivers/nouveau/nouveau_screen.h
  	boolean hint_buf_keep_sysmem_copy;
  
  #ifdef NOUVEAU_ENABLE_DRIVER_STATISTICS
-Index: mesa/src/gallium/drivers/nv30/nv30_screen.c
-===================================================================
---- mesa.orig/src/gallium/drivers/nv30/nv30_screen.c	2013-06-11 15:55:49.921553273 +1000
-+++ mesa/src/gallium/drivers/nv30/nv30_screen.c	2013-06-11 15:56:57.989549639 +1000
+diff --git a/src/gallium/drivers/nv30/nv30_screen.c b/src/gallium/drivers/nv30/nv30_screen.c
+index c9943e0..2e0dabe 100644
+--- a/src/gallium/drivers/nv30/nv30_screen.c
++++ b/src/gallium/drivers/nv30/nv30_screen.c
 @@ -31,6 +31,8 @@
  #include "nv30-40_3d.xml.h"
  #include "nv01_2d.xml.h"
@@ -858,7 +845,14 @@ Index: mesa/src/gallium/drivers/nv30/nv30_screen.c
  #include "nouveau/nouveau_fence.h"
  #include "nv30_screen.h"
  #include "nv30_context.h"
-@@ -131,6 +133,9 @@
+@@ -125,12 +127,16 @@ nv30_screen_get_param(struct pipe_screen *pscreen, enum pipe_cap param)
+    case PIPE_CAP_QUERY_PIPELINE_STATISTICS:
+    case PIPE_CAP_TEXTURE_BORDER_COLOR_QUIRK:
+    case PIPE_CAP_MAX_TEXTURE_BUFFER_SIZE:
++   case PIPE_CAP_PRIME:
+       return 0;
+    case PIPE_CAP_VERTEX_BUFFER_OFFSET_4BYTE_ALIGNED_ONLY:
+    case PIPE_CAP_VERTEX_BUFFER_STRIDE_4BYTE_ALIGNED_ONLY:
     case PIPE_CAP_VERTEX_ELEMENT_SRC_OFFSET_4BYTE_ALIGNED_ONLY:
     case PIPE_CAP_PREFER_BLIT_BASED_TEXTURE_TRANSFER:
        return 1;
@@ -868,10 +862,10 @@ Index: mesa/src/gallium/drivers/nv30/nv30_screen.c
     default:
        debug_printf("unknown param %d\n", param);
        return 0;
-Index: mesa/src/gallium/drivers/nv50/nv50_screen.c
-===================================================================
---- mesa.orig/src/gallium/drivers/nv50/nv50_screen.c	2013-06-11 15:55:49.921553273 +1000
-+++ mesa/src/gallium/drivers/nv50/nv50_screen.c	2013-06-11 15:55:49.905553274 +1000
+diff --git a/src/gallium/drivers/nv50/nv50_screen.c b/src/gallium/drivers/nv50/nv50_screen.c
+index b6da303..88eabd4 100644
+--- a/src/gallium/drivers/nv50/nv50_screen.c
++++ b/src/gallium/drivers/nv50/nv50_screen.c
 @@ -24,6 +24,8 @@
  #include "util/u_format_s3tc.h"
  #include "pipe/p_screen.h"
@@ -881,7 +875,7 @@ Index: mesa/src/gallium/drivers/nv50/nv50_screen.c
  #include "nv50_context.h"
  #include "nv50_screen.h"
  
-@@ -190,6 +192,9 @@
+@@ -190,6 +192,9 @@ nv50_screen_get_param(struct pipe_screen *pscreen, enum pipe_cap param)
        return 0;
     case PIPE_CAP_TEXTURE_BORDER_COLOR_QUIRK:
        return PIPE_QUIRK_TEXTURE_BORDER_COLOR_SWIZZLE_NV50;
@@ -891,10 +885,10 @@ Index: mesa/src/gallium/drivers/nv50/nv50_screen.c
     default:
        NOUVEAU_ERR("unknown PIPE_CAP %d\n", param);
        return 0;
-Index: mesa/src/gallium/drivers/nvc0/nvc0_screen.c
-===================================================================
---- mesa.orig/src/gallium/drivers/nvc0/nvc0_screen.c	2013-06-11 15:55:49.921553273 +1000
-+++ mesa/src/gallium/drivers/nvc0/nvc0_screen.c	2013-06-11 15:55:49.905553274 +1000
+diff --git a/src/gallium/drivers/nvc0/nvc0_screen.c b/src/gallium/drivers/nvc0/nvc0_screen.c
+index 97ce82c..b7dca8b 100644
+--- a/src/gallium/drivers/nvc0/nvc0_screen.c
++++ b/src/gallium/drivers/nvc0/nvc0_screen.c
 @@ -24,6 +24,8 @@
  #include "util/u_format_s3tc.h"
  #include "pipe/p_screen.h"
@@ -904,7 +898,7 @@ Index: mesa/src/gallium/drivers/nvc0/nvc0_screen.c
  #include "vl/vl_decoder.h"
  #include "vl/vl_video_buffer.h"
  
-@@ -180,6 +182,9 @@
+@@ -180,6 +182,9 @@ nvc0_screen_get_param(struct pipe_screen *pscreen, enum pipe_cap param)
        return 1;
     case PIPE_CAP_TEXTURE_BORDER_COLOR_QUIRK:
        return PIPE_QUIRK_TEXTURE_BORDER_COLOR_SWIZZLE_NV50;
@@ -914,10 +908,10 @@ Index: mesa/src/gallium/drivers/nvc0/nvc0_screen.c
     default:
        NOUVEAU_ERR("unknown PIPE_CAP %d\n", param);
        return 0;
-Index: mesa/src/gallium/drivers/r300/r300_screen.c
-===================================================================
---- mesa.orig/src/gallium/drivers/r300/r300_screen.c	2013-06-11 15:55:49.921553273 +1000
-+++ mesa/src/gallium/drivers/r300/r300_screen.c	2013-06-11 15:55:49.905553274 +1000
+diff --git a/src/gallium/drivers/r300/r300_screen.c b/src/gallium/drivers/r300/r300_screen.c
+index e58916b..0bb7d00 100644
+--- a/src/gallium/drivers/r300/r300_screen.c
++++ b/src/gallium/drivers/r300/r300_screen.c
 @@ -28,6 +28,8 @@
  #include "vl/vl_decoder.h"
  #include "vl/vl_video_buffer.h"
@@ -927,7 +921,15 @@ Index: mesa/src/gallium/drivers/r300/r300_screen.c
  #include "r300_context.h"
  #include "r300_texture.h"
  #include "r300_screen_buffer.h"
-@@ -191,6 +193,11 @@
+@@ -164,6 +166,7 @@ static int r300_get_param(struct pipe_screen* pscreen, enum pipe_cap param)
+         case PIPE_CAP_TEXTURE_BUFFER_OFFSET_ALIGNMENT:
+         case PIPE_CAP_TEXTURE_BORDER_COLOR_QUIRK:
+         case PIPE_CAP_MAX_TEXTURE_BUFFER_SIZE:
++        case PIPE_CAP_PRIME:
+             return 0;
+ 
+         /* SWTCL-only features. */
+@@ -191,6 +194,11 @@ static int r300_get_param(struct pipe_screen* pscreen, enum pipe_cap param)
          /* Render targets. */
          case PIPE_CAP_MAX_RENDER_TARGETS:
              return 4;
@@ -939,10 +941,10 @@ Index: mesa/src/gallium/drivers/r300/r300_screen.c
      }
      return 0;
  }
-Index: mesa/src/gallium/drivers/r600/r600_pipe.c
-===================================================================
---- mesa.orig/src/gallium/drivers/r600/r600_pipe.c	2013-06-11 15:55:49.921553273 +1000
-+++ mesa/src/gallium/drivers/r600/r600_pipe.c	2013-06-11 15:55:49.905553274 +1000
+diff --git a/src/gallium/drivers/r600/r600_pipe.c b/src/gallium/drivers/r600/r600_pipe.c
+index 71f555b..a17cda0 100644
+--- a/src/gallium/drivers/r600/r600_pipe.c
++++ b/src/gallium/drivers/r600/r600_pipe.c
 @@ -27,6 +27,7 @@
  #include "r600d.h"
  
@@ -951,7 +953,7 @@ Index: mesa/src/gallium/drivers/r600/r600_pipe.c
  
  #include <errno.h>
  #include "pipe/p_shader_tokens.h"
-@@ -673,6 +674,10 @@
+@@ -673,6 +674,10 @@ static int r600_get_param(struct pipe_screen* pscreen, enum pipe_cap param)
  
  	case PIPE_CAP_TEXTURE_BORDER_COLOR_QUIRK:
  		return PIPE_QUIRK_TEXTURE_BORDER_COLOR_SWIZZLE_R600;
@@ -962,10 +964,10 @@ Index: mesa/src/gallium/drivers/r600/r600_pipe.c
  	}
  	return 0;
  }
-Index: mesa/src/gallium/drivers/radeonsi/radeonsi_pipe.c
-===================================================================
---- mesa.orig/src/gallium/drivers/radeonsi/radeonsi_pipe.c	2013-06-11 15:55:49.921553273 +1000
-+++ mesa/src/gallium/drivers/radeonsi/radeonsi_pipe.c	2013-06-11 15:55:49.909553274 +1000
+diff --git a/src/gallium/drivers/radeonsi/radeonsi_pipe.c b/src/gallium/drivers/radeonsi/radeonsi_pipe.c
+index 382311f..a3d5b12 100644
+--- a/src/gallium/drivers/radeonsi/radeonsi_pipe.c
++++ b/src/gallium/drivers/radeonsi/radeonsi_pipe.c
 @@ -20,6 +20,7 @@
   * OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
   * USE OR OTHER DEALINGS IN THE SOFTWARE.
@@ -974,7 +976,15 @@ Index: mesa/src/gallium/drivers/radeonsi/radeonsi_pipe.c
  #include <stdio.h>
  #include <errno.h>
  #include "pipe/p_defines.h"
-@@ -426,6 +427,9 @@
+@@ -384,6 +385,7 @@ static int r600_get_param(struct pipe_screen* pscreen, enum pipe_cap param)
+ 	case PIPE_CAP_TEXTURE_BUFFER_OFFSET_ALIGNMENT:
+ 	case PIPE_CAP_TEXTURE_BORDER_COLOR_QUIRK:
+         case PIPE_CAP_MAX_TEXTURE_BUFFER_SIZE:
++	case PIPE_CAP_PRIME:
+ 		return 0;
+ 
+ 	/* Stream output. */
+@@ -426,6 +428,9 @@ static int r600_get_param(struct pipe_screen* pscreen, enum pipe_cap param)
  
  	case PIPE_CAP_MAX_TEXEL_OFFSET:
  		return 7;
@@ -984,11 +994,11 @@ Index: mesa/src/gallium/drivers/radeonsi/radeonsi_pipe.c
  	}
  	return 0;
  }
-Index: mesa/src/gallium/drivers/softpipe/sp_screen.c
-===================================================================
---- mesa.orig/src/gallium/drivers/softpipe/sp_screen.c	2013-06-11 15:55:49.921553273 +1000
-+++ mesa/src/gallium/drivers/softpipe/sp_screen.c	2013-06-11 15:55:49.909553274 +1000
-@@ -184,6 +184,8 @@
+diff --git a/src/gallium/drivers/softpipe/sp_screen.c b/src/gallium/drivers/softpipe/sp_screen.c
+index 16311fa..fb6313f 100644
+--- a/src/gallium/drivers/softpipe/sp_screen.c
++++ b/src/gallium/drivers/softpipe/sp_screen.c
+@@ -184,6 +184,8 @@ softpipe_get_param(struct pipe_screen *screen, enum pipe_cap param)
        return 0;
     case PIPE_CAP_MAX_VIEWPORTS:
        return 1;
@@ -997,11 +1007,11 @@ Index: mesa/src/gallium/drivers/softpipe/sp_screen.c
     }
     /* should only get here on unhandled cases */
     debug_printf("Unexpected PIPE_CAP %d query\n", param);
-Index: mesa/src/gallium/drivers/svga/svga_screen.c
-===================================================================
---- mesa.orig/src/gallium/drivers/svga/svga_screen.c	2013-06-11 15:55:49.921553273 +1000
-+++ mesa/src/gallium/drivers/svga/svga_screen.c	2013-06-11 15:55:49.909553274 +1000
-@@ -266,6 +266,7 @@
+diff --git a/src/gallium/drivers/svga/svga_screen.c b/src/gallium/drivers/svga/svga_screen.c
+index 826a9a9..ca958d5 100644
+--- a/src/gallium/drivers/svga/svga_screen.c
++++ b/src/gallium/drivers/svga/svga_screen.c
+@@ -266,6 +266,7 @@ svga_get_param(struct pipe_screen *screen, enum pipe_cap param)
     case PIPE_CAP_TEXTURE_BUFFER_OFFSET_ALIGNMENT:
     case PIPE_CAP_QUERY_PIPELINE_STATISTICS:
     case PIPE_CAP_MAX_TEXTURE_BUFFER_SIZE:
@@ -1009,11 +1019,11 @@ Index: mesa/src/gallium/drivers/svga/svga_screen.c
        return 0;
     case PIPE_CAP_VERTEX_ELEMENT_SRC_OFFSET_4BYTE_ALIGNED_ONLY:
        return 1;
-Index: mesa/src/gallium/include/pipe/p_defines.h
-===================================================================
---- mesa.orig/src/gallium/include/pipe/p_defines.h	2013-06-11 15:55:49.921553273 +1000
-+++ mesa/src/gallium/include/pipe/p_defines.h	2013-06-11 15:55:49.909553274 +1000
-@@ -508,7 +508,8 @@
+diff --git a/src/gallium/include/pipe/p_defines.h b/src/gallium/include/pipe/p_defines.h
+index 8af1a84..6833e6a 100644
+--- a/src/gallium/include/pipe/p_defines.h
++++ b/src/gallium/include/pipe/p_defines.h
+@@ -508,7 +508,8 @@ enum pipe_cap {
     PIPE_CAP_QUERY_PIPELINE_STATISTICS = 81,
     PIPE_CAP_TEXTURE_BORDER_COLOR_QUIRK = 82,
     PIPE_CAP_MAX_TEXTURE_BUFFER_SIZE = 83,
@@ -1023,11 +1033,11 @@ Index: mesa/src/gallium/include/pipe/p_defines.h
  };
  
  #define PIPE_QUIRK_TEXTURE_BORDER_COLOR_SWIZZLE_NV50 (1 << 0)
-Index: mesa/src/gallium/include/state_tracker/drm_driver.h
-===================================================================
---- mesa.orig/src/gallium/include/state_tracker/drm_driver.h	2013-06-11 15:55:49.921553273 +1000
-+++ mesa/src/gallium/include/state_tracker/drm_driver.h	2013-06-11 15:55:49.909553274 +1000
-@@ -10,6 +10,8 @@
+diff --git a/src/gallium/include/state_tracker/drm_driver.h b/src/gallium/include/state_tracker/drm_driver.h
+index f9bd222..5b76d87 100644
+--- a/src/gallium/include/state_tracker/drm_driver.h
++++ b/src/gallium/include/state_tracker/drm_driver.h
+@@ -10,6 +10,8 @@ struct pipe_resource;
  
  #define DRM_API_HANDLE_TYPE_SHARED 0
  #define DRM_API_HANDLE_TYPE_KMS    1
@@ -1036,7 +1046,7 @@ Index: mesa/src/gallium/include/state_tracker/drm_driver.h
  
  /**
   * For use with pipe_screen::{texture_from_handle|texture_get_handle}.
-@@ -17,9 +19,10 @@
+@@ -17,9 +19,10 @@ struct pipe_resource;
  struct winsys_handle
  {
     /**
@@ -1050,11 +1060,11 @@ Index: mesa/src/gallium/include/state_tracker/drm_driver.h
      */
     unsigned type;
     /**
-Index: mesa/src/gallium/state_trackers/dri/drm/dri2.c
-===================================================================
---- mesa.orig/src/gallium/state_trackers/dri/drm/dri2.c	2013-06-11 15:55:49.921553273 +1000
-+++ mesa/src/gallium/state_trackers/dri/drm/dri2.c	2013-06-11 15:55:49.913553274 +1000
-@@ -230,7 +230,13 @@
+diff --git a/src/gallium/state_trackers/dri/drm/dri2.c b/src/gallium/state_trackers/dri/drm/dri2.c
+index 1839b16..63b1de6 100644
+--- a/src/gallium/state_trackers/dri/drm/dri2.c
++++ b/src/gallium/state_trackers/dri/drm/dri2.c
+@@ -230,7 +230,13 @@ dri2_drawable_process_buffers(struct dri_drawable *drawable,
  
        templ.format = format;
        templ.bind = bind;
@@ -1069,7 +1079,7 @@ Index: mesa/src/gallium/state_trackers/dri/drm/dri2.c
        whandle.stride = buf->pitch;
  
        drawable->textures[statt] =
-@@ -451,14 +457,14 @@
+@@ -451,14 +457,14 @@ dri2_lookup_egl_image(struct dri_screen *screen, void *handle)
  }
  
  static __DRIimage *
@@ -1088,7 +1098,7 @@ Index: mesa/src/gallium/state_trackers/dri/drm/dri2.c
     unsigned tex_usage;
     enum pipe_format pf;
  
-@@ -498,12 +504,10 @@
+@@ -498,12 +504,10 @@ dri2_create_image_from_name(__DRIscreen *_screen,
     templ.depth0 = 1;
     templ.array_size = 1;
  
@@ -1103,7 +1113,7 @@ Index: mesa/src/gallium/state_trackers/dri/drm/dri2.c
     if (!img->texture) {
        FREE(img);
        return NULL;
-@@ -518,6 +522,39 @@
+@@ -518,6 +522,39 @@ dri2_create_image_from_name(__DRIscreen *_screen,
  }
  
  static __DRIimage *
@@ -1143,7 +1153,7 @@ Index: mesa/src/gallium/state_trackers/dri/drm/dri2.c
  dri2_create_image_from_renderbuffer(__DRIcontext *context,
  				    int renderbuffer, void *loaderPrivate)
  {
-@@ -609,6 +646,7 @@
+@@ -609,6 +646,7 @@ dri2_query_image(__DRIimage *image, int attrib, int *value)
  
     switch (attrib) {
     case __DRI_IMAGE_ATTRIB_STRIDE:
@@ -1151,7 +1161,7 @@ Index: mesa/src/gallium/state_trackers/dri/drm/dri2.c
        image->texture->screen->resource_get_handle(image->texture->screen,
              image->texture, &whandle);
        *value = whandle.stride;
-@@ -625,6 +663,11 @@
+@@ -625,6 +663,11 @@ dri2_query_image(__DRIimage *image, int attrib, int *value)
           image->texture, &whandle);
        *value = whandle.handle;
        return GL_TRUE;
@@ -1163,7 +1173,7 @@ Index: mesa/src/gallium/state_trackers/dri/drm/dri2.c
     case __DRI_IMAGE_ATTRIB_FORMAT:
        *value = image->dri_format;
        return GL_TRUE;
-@@ -748,6 +791,67 @@
+@@ -748,6 +791,67 @@ dri2_from_planar(__DRIimage *image, int plane, void *loaderPrivate)
     return img;
  }
  
@@ -1231,7 +1241,7 @@ Index: mesa/src/gallium/state_trackers/dri/drm/dri2.c
  static void
  dri2_destroy_image(__DRIimage *img)
  {
-@@ -756,7 +860,7 @@
+@@ -756,7 +860,7 @@ dri2_destroy_image(__DRIimage *img)
  }
  
  static struct __DRIimageExtensionRec dri2ImageExtension = {
@@ -1240,7 +1250,7 @@ Index: mesa/src/gallium/state_trackers/dri/drm/dri2.c
      dri2_create_image_from_name,
      dri2_create_image_from_renderbuffer,
      dri2_destroy_image,
-@@ -766,6 +870,8 @@
+@@ -766,6 +870,8 @@ static struct __DRIimageExtensionRec dri2ImageExtension = {
      dri2_validate_usage,
      dri2_from_names,
      dri2_from_planar,
@@ -1249,7 +1259,7 @@ Index: mesa/src/gallium/state_trackers/dri/drm/dri2.c
  };
  
  /*
-@@ -812,6 +918,12 @@
+@@ -812,6 +918,12 @@ dri2_init_screen(__DRIscreen * sPriv)
        screen->default_throttle_frames = throttle_ret->val.val_int;
     }
  
@@ -1262,11 +1272,11 @@ Index: mesa/src/gallium/state_trackers/dri/drm/dri2.c
     sPriv->extensions = dri_screen_extensions;
  
     /* dri_init_screen_helper checks pscreen for us */
-Index: mesa/src/gallium/state_trackers/egl/common/native_helper.c
-===================================================================
---- mesa.orig/src/gallium/state_trackers/egl/common/native_helper.c	2013-06-11 15:55:49.921553273 +1000
-+++ mesa/src/gallium/state_trackers/egl/common/native_helper.c	2013-06-11 15:55:49.913553274 +1000
-@@ -427,6 +427,7 @@
+diff --git a/src/gallium/state_trackers/egl/common/native_helper.c b/src/gallium/state_trackers/egl/common/native_helper.c
+index b578a8a..d1e1acd 100644
+--- a/src/gallium/state_trackers/egl/common/native_helper.c
++++ b/src/gallium/state_trackers/egl/common/native_helper.c
+@@ -427,6 +427,7 @@ drm_display_import_native_buffer(struct native_display *ndpy,
  
           memset(&wsh, 0, sizeof(wsh));
           wsh.handle = nbuf->u.drm.name;
@@ -1274,11 +1284,11 @@ Index: mesa/src/gallium/state_trackers/egl/common/native_helper.c
           wsh.stride = nbuf->u.drm.stride;
  
           res = screen->resource_from_handle(screen, &nbuf->u.drm.templ, &wsh);
-Index: mesa/src/gallium/state_trackers/egl/x11/native_dri2.c
-===================================================================
---- mesa.orig/src/gallium/state_trackers/egl/x11/native_dri2.c	2013-06-11 15:55:49.921553273 +1000
-+++ mesa/src/gallium/state_trackers/egl/x11/native_dri2.c	2013-06-11 15:55:49.913553274 +1000
-@@ -176,6 +176,7 @@
+diff --git a/src/gallium/state_trackers/egl/x11/native_dri2.c b/src/gallium/state_trackers/egl/x11/native_dri2.c
+index 053044a..e1ec459 100644
+--- a/src/gallium/state_trackers/egl/x11/native_dri2.c
++++ b/src/gallium/state_trackers/egl/x11/native_dri2.c
+@@ -176,6 +176,7 @@ dri2_surface_process_drawable_buffers(struct native_surface *nsurf,
        }
  
        memset(&whandle, 0, sizeof(whandle));
@@ -1286,11 +1296,11 @@ Index: mesa/src/gallium/state_trackers/egl/x11/native_dri2.c
        whandle.stride = xbuf->pitch;
        whandle.handle = xbuf->name;
        dri2surf->textures[natt] = dri2dpy->base.screen->resource_from_handle(
-Index: mesa/src/gallium/winsys/i915/drm/i915_drm_buffer.c
-===================================================================
---- mesa.orig/src/gallium/winsys/i915/drm/i915_drm_buffer.c	2013-06-11 15:55:49.921553273 +1000
-+++ mesa/src/gallium/winsys/i915/drm/i915_drm_buffer.c	2013-06-11 15:55:49.913553274 +1000
-@@ -95,9 +95,13 @@
+diff --git a/src/gallium/winsys/i915/drm/i915_drm_buffer.c b/src/gallium/winsys/i915/drm/i915_drm_buffer.c
+index ac66af3..38e0619 100644
+--- a/src/gallium/winsys/i915/drm/i915_drm_buffer.c
++++ b/src/gallium/winsys/i915/drm/i915_drm_buffer.c
+@@ -95,9 +95,13 @@ i915_drm_buffer_from_handle(struct i915_winsys *iws,
                              unsigned *stride)
  {
     struct i915_drm_winsys *idws = i915_drm_winsys(iws);
@@ -1305,10 +1315,10 @@ Index: mesa/src/gallium/winsys/i915/drm/i915_drm_buffer.c
     if (!buf)
        return NULL;
  
-Index: mesa/src/gallium/winsys/radeon/drm/radeon_drm_bo.c
-===================================================================
---- mesa.orig/src/gallium/winsys/radeon/drm/radeon_drm_bo.c	2013-06-11 15:55:49.921553273 +1000
-+++ mesa/src/gallium/winsys/radeon/drm/radeon_drm_bo.c	2013-06-11 15:55:49.913553274 +1000
+diff --git a/src/gallium/winsys/radeon/drm/radeon_drm_bo.c b/src/gallium/winsys/radeon/drm/radeon_drm_bo.c
+index bcd4b27..b87ba69 100644
+--- a/src/gallium/winsys/radeon/drm/radeon_drm_bo.c
++++ b/src/gallium/winsys/radeon/drm/radeon_drm_bo.c
 @@ -40,6 +40,7 @@
  #include <sys/ioctl.h>
  #include <xf86drm.h>
@@ -1317,7 +1327,7 @@ Index: mesa/src/gallium/winsys/radeon/drm/radeon_drm_bo.c
  
  /*
   * this are copy from radeon_drm, once an updated libdrm is released
-@@ -114,7 +115,9 @@
+@@ -114,7 +115,9 @@ struct radeon_bomgr {
      /* Winsys. */
      struct radeon_drm_winsys *rws;
  
@@ -1328,7 +1338,7 @@ Index: mesa/src/gallium/winsys/radeon/drm/radeon_drm_bo.c
      struct util_hash_table *bo_handles;
      pipe_mutex bo_handles_mutex;
      pipe_mutex bo_va_mutex;
-@@ -370,12 +373,13 @@
+@@ -370,12 +373,13 @@ static void radeon_bo_destroy(struct pb_buffer *_buf)
  
      memset(&args, 0, sizeof(args));
  
@@ -1345,7 +1355,7 @@ Index: mesa/src/gallium/winsys/radeon/drm/radeon_drm_bo.c
  
      if (bo->ptr)
          os_munmap(bo->ptr, bo->base.size);
-@@ -658,7 +662,8 @@
+@@ -658,7 +662,8 @@ static boolean radeon_bomgr_is_buffer_busy(struct pb_manager *_mgr,
  static void radeon_bomgr_destroy(struct pb_manager *_mgr)
  {
      struct radeon_bomgr *mgr = radeon_bomgr(_mgr);
@@ -1355,7 +1365,7 @@ Index: mesa/src/gallium/winsys/radeon/drm/radeon_drm_bo.c
      pipe_mutex_destroy(mgr->bo_handles_mutex);
      pipe_mutex_destroy(mgr->bo_va_mutex);
      FREE(mgr);
-@@ -690,6 +695,7 @@
+@@ -690,6 +695,7 @@ struct pb_manager *radeon_bomgr_create(struct radeon_drm_winsys *rws)
      mgr->base.is_buffer_busy = radeon_bomgr_is_buffer_busy;
  
      mgr->rws = rws;
@@ -1363,7 +1373,7 @@ Index: mesa/src/gallium/winsys/radeon/drm/radeon_drm_bo.c
      mgr->bo_handles = util_hash_table_create(handle_hash, handle_compare);
      pipe_mutex_init(mgr->bo_handles_mutex);
      pipe_mutex_init(mgr->bo_va_mutex);
-@@ -839,6 +845,7 @@
+@@ -839,6 +845,7 @@ radeon_winsys_bo_create(struct radeon_winsys *rws,
                          enum radeon_bo_domain domain)
  {
      struct radeon_drm_winsys *ws = radeon_drm_winsys(rws);
@@ -1371,7 +1381,7 @@ Index: mesa/src/gallium/winsys/radeon/drm/radeon_drm_bo.c
      struct radeon_bo_desc desc;
      struct pb_manager *provider;
      struct pb_buffer *buffer;
-@@ -860,6 +867,10 @@
+@@ -860,6 +867,10 @@ radeon_winsys_bo_create(struct radeon_winsys *rws,
      if (!buffer)
          return NULL;
  
@@ -1382,7 +1392,7 @@ Index: mesa/src/gallium/winsys/radeon/drm/radeon_drm_bo.c
      return (struct pb_buffer*)buffer;
  }
  
-@@ -872,6 +883,7 @@
+@@ -872,6 +883,7 @@ static struct pb_buffer *radeon_winsys_bo_from_handle(struct radeon_winsys *rws,
      struct radeon_bomgr *mgr = radeon_bomgr(ws->kman);
      struct drm_gem_open open_arg = {};
      int r;
@@ -1390,7 +1400,7 @@ Index: mesa/src/gallium/winsys/radeon/drm/radeon_drm_bo.c
  
      memset(&open_arg, 0, sizeof(open_arg));
  
-@@ -883,8 +895,20 @@
+@@ -883,8 +895,20 @@ static struct pb_buffer *radeon_winsys_bo_from_handle(struct radeon_winsys *rws,
       * The list of pairs is guarded by a mutex, of course. */
      pipe_mutex_lock(mgr->bo_handles_mutex);
  
@@ -1413,7 +1423,7 @@ Index: mesa/src/gallium/winsys/radeon/drm/radeon_drm_bo.c
      if (bo) {
          /* Increase the refcount. */
          struct pb_buffer *b = NULL;
-@@ -898,27 +922,38 @@
+@@ -898,27 +922,38 @@ static struct pb_buffer *radeon_winsys_bo_from_handle(struct radeon_winsys *rws,
          goto fail;
      }
  
@@ -1461,7 +1471,7 @@ Index: mesa/src/gallium/winsys/radeon/drm/radeon_drm_bo.c
  
  done:
      pipe_mutex_unlock(mgr->bo_handles_mutex);
-@@ -956,6 +991,9 @@
+@@ -956,6 +991,9 @@ done:
      ws->allocated_vram += align(open_arg.size, 4096);
      bo->initial_domain = RADEON_DOMAIN_VRAM;
  
@@ -1471,7 +1481,7 @@ Index: mesa/src/gallium/winsys/radeon/drm/radeon_drm_bo.c
      return (struct pb_buffer*)bo;
  
  fail:
-@@ -984,12 +1022,15 @@
+@@ -984,12 +1022,15 @@ static boolean radeon_winsys_bo_get_handle(struct pb_buffer *buffer,
              bo->flink = flink.name;
  
              pipe_mutex_lock(bo->mgr->bo_handles_mutex);
@@ -1488,11 +1498,11 @@ Index: mesa/src/gallium/winsys/radeon/drm/radeon_drm_bo.c
      }
  
      whandle->stride = stride;
-Index: mesa/src/gallium/winsys/radeon/drm/radeon_drm_winsys.c
-===================================================================
---- mesa.orig/src/gallium/winsys/radeon/drm/radeon_drm_winsys.c	2013-06-11 15:55:49.921553273 +1000
-+++ mesa/src/gallium/winsys/radeon/drm/radeon_drm_winsys.c	2013-06-11 15:55:49.913553274 +1000
-@@ -341,6 +341,10 @@
+diff --git a/src/gallium/winsys/radeon/drm/radeon_drm_winsys.c b/src/gallium/winsys/radeon/drm/radeon_drm_winsys.c
+index ee4dfa1..fe93f6b 100644
+--- a/src/gallium/winsys/radeon/drm/radeon_drm_winsys.c
++++ b/src/gallium/winsys/radeon/drm/radeon_drm_winsys.c
+@@ -341,6 +341,10 @@ static boolean do_winsys_init(struct radeon_drm_winsys *ws)
              ws->info.has_uvd = value;
      }
  
@@ -1503,11 +1513,11 @@ Index: mesa/src/gallium/winsys/radeon/drm/radeon_drm_winsys.c
      /* Get GEM info. */
      retval = drmCommandWriteRead(ws->fd, DRM_RADEON_GEM_INFO,
              &gem_info, sizeof(gem_info));
-Index: mesa/src/gallium/winsys/radeon/drm/radeon_winsys.h
-===================================================================
---- mesa.orig/src/gallium/winsys/radeon/drm/radeon_winsys.h	2013-06-11 15:55:49.921553273 +1000
-+++ mesa/src/gallium/winsys/radeon/drm/radeon_winsys.h	2013-06-11 15:55:49.917553274 +1000
-@@ -179,6 +179,8 @@
+diff --git a/src/gallium/winsys/radeon/drm/radeon_winsys.h b/src/gallium/winsys/radeon/drm/radeon_winsys.h
+index d0f16e1..904867c 100644
+--- a/src/gallium/winsys/radeon/drm/radeon_winsys.h
++++ b/src/gallium/winsys/radeon/drm/radeon_winsys.h
+@@ -179,6 +179,8 @@ struct radeon_info {
      uint32_t                    r300_num_gb_pipes;
      uint32_t                    r300_num_z_pipes;
  
@@ -1516,11 +1526,11 @@ Index: mesa/src/gallium/winsys/radeon/drm/radeon_winsys.h
      uint32_t                    r600_num_backends;
      uint32_t                    r600_clock_crystal_freq;
      uint32_t                    r600_tiling_config;
-Index: mesa/src/gallium/winsys/svga/drm/vmw_screen_dri.c
-===================================================================
---- mesa.orig/src/gallium/winsys/svga/drm/vmw_screen_dri.c	2013-06-11 15:55:49.921553273 +1000
-+++ mesa/src/gallium/winsys/svga/drm/vmw_screen_dri.c	2013-06-11 15:55:49.917553274 +1000
-@@ -163,6 +163,12 @@
+diff --git a/src/gallium/winsys/svga/drm/vmw_screen_dri.c b/src/gallium/winsys/svga/drm/vmw_screen_dri.c
+index 511cca7..6323a8a 100644
+--- a/src/gallium/winsys/svga/drm/vmw_screen_dri.c
++++ b/src/gallium/winsys/svga/drm/vmw_screen_dri.c
+@@ -163,6 +163,12 @@ vmw_drm_surface_from_handle(struct svga_winsys_screen *sws,
      int ret;
      int i;
  
@@ -1533,10 +1543,10 @@ Index: mesa/src/gallium/winsys/svga/drm/vmw_screen_dri.c
      /**
       * The vmware device specific handle is the hardware SID.
       * FIXME: We probably want to move this to the ioctl implementations.
-Index: mesa/src/gbm/backends/dri/gbm_dri.c
-===================================================================
---- mesa.orig/src/gbm/backends/dri/gbm_dri.c	2013-06-11 15:55:49.921553273 +1000
-+++ mesa/src/gbm/backends/dri/gbm_dri.c	2013-06-11 15:55:49.917553274 +1000
+diff --git a/src/gbm/backends/dri/gbm_dri.c b/src/gbm/backends/dri/gbm_dri.c
+index a3a0530..6701b14 100644
+--- a/src/gbm/backends/dri/gbm_dri.c
++++ b/src/gbm/backends/dri/gbm_dri.c
 @@ -44,6 +44,8 @@
  #include "gbm_driint.h"
  
@@ -1546,7 +1556,7 @@ Index: mesa/src/gbm/backends/dri/gbm_dri.c
  
  /* For importing wl_buffer */
  #if HAVE_WAYLAND_PLATFORM
-@@ -281,9 +283,11 @@
+@@ -281,9 +283,11 @@ gbm_dri_is_format_supported(struct gbm_device *gbm,
     switch (format) {
     case GBM_BO_FORMAT_XRGB8888:
     case GBM_FORMAT_XRGB8888:
@@ -1558,7 +1568,7 @@ Index: mesa/src/gbm/backends/dri/gbm_dri.c
        if (usage & GBM_BO_USE_SCANOUT)
           return 0;
        break;
-@@ -318,9 +322,9 @@
+@@ -318,9 +322,9 @@ gbm_dri_bo_destroy(struct gbm_bo *_bo)
     struct gbm_dri_bo *bo = gbm_dri_bo(_bo);
     struct drm_mode_destroy_dumb arg;
  
@@ -1570,7 +1580,7 @@ Index: mesa/src/gbm/backends/dri/gbm_dri.c
        munmap(bo->map, bo->size);
        memset(&arg, 0, sizeof(arg));
        arg.handle = bo->handle;
-@@ -348,6 +352,9 @@
+@@ -348,6 +352,9 @@ gbm_dri_to_gbm_format(uint32_t dri_format)
     case __DRI_IMAGE_FORMAT_ABGR8888:
        ret = GBM_FORMAT_ABGR8888;
        break;
@@ -1580,7 +1590,7 @@ Index: mesa/src/gbm/backends/dri/gbm_dri.c
     default:
        ret = 0;
        break;
-@@ -356,6 +363,37 @@
+@@ -356,6 +363,37 @@ gbm_dri_to_gbm_format(uint32_t dri_format)
     return ret;
  }
  
@@ -1618,7 +1628,7 @@ Index: mesa/src/gbm/backends/dri/gbm_dri.c
  static struct gbm_bo *
  gbm_dri_bo_import(struct gbm_device *gbm,
                    uint32_t type, void *buffer, uint32_t usage)
-@@ -460,9 +498,8 @@
+@@ -460,9 +498,8 @@ create_dumb(struct gbm_device *gbm,
     struct drm_mode_destroy_dumb destroy_arg;
     int ret;
  
@@ -1630,7 +1640,7 @@ Index: mesa/src/gbm/backends/dri/gbm_dri.c
        return NULL;
  
     bo = calloc(1, sizeof *bo);
-@@ -477,6 +514,7 @@
+@@ -477,6 +514,7 @@ create_dumb(struct gbm_device *gbm,
     if (ret)
        goto free_bo;
  
@@ -1638,7 +1648,7 @@ Index: mesa/src/gbm/backends/dri/gbm_dri.c
     bo->base.base.gbm = gbm;
     bo->base.base.width = width;
     bo->base.base.height = height;
-@@ -498,6 +536,25 @@
+@@ -498,6 +536,25 @@ create_dumb(struct gbm_device *gbm,
     if (bo->map == MAP_FAILED)
        goto destroy_dumb;
  
@@ -1664,7 +1674,7 @@ Index: mesa/src/gbm/backends/dri/gbm_dri.c
     return &bo->base.base;
  
  destroy_dumb:
-@@ -532,24 +589,10 @@
+@@ -532,24 +589,10 @@ gbm_dri_bo_create(struct gbm_device *gbm,
     bo->base.base.height = height;
     bo->base.base.format = format;
  
@@ -1693,11 +1703,11 @@ Index: mesa/src/gbm/backends/dri/gbm_dri.c
  
     if (usage & GBM_BO_USE_SCANOUT)
        dri_use |= __DRI_IMAGE_USE_SCANOUT;
-Index: mesa/src/mesa/drivers/dri/intel/intel_context.c
-===================================================================
---- mesa.orig/src/mesa/drivers/dri/intel/intel_context.c	2013-06-11 15:55:49.921553273 +1000
-+++ mesa/src/mesa/drivers/dri/intel/intel_context.c	2013-06-11 15:55:49.917553274 +1000
-@@ -984,34 +984,47 @@
+diff --git a/src/mesa/drivers/dri/intel/intel_context.c b/src/mesa/drivers/dri/intel/intel_context.c
+index 09b33b1..df7a5c2 100644
+--- a/src/mesa/drivers/dri/intel/intel_context.c
++++ b/src/mesa/drivers/dri/intel/intel_context.c
+@@ -984,34 +984,47 @@ intel_process_dri2_buffer(struct intel_context *intel,
      * use of a mapping of the buffer involves a bunch of page faulting which is
      * moderately expensive.
      */

@@ -1,3 +1,10 @@
+mesa (9.2~git20130611.761320b1-0ubuntu0+mir2) saucy; urgency=low
+
+  * Mir EGL: add SwapInterval 0 support
+  * debian/control: Bump build-depends on mir to 0.4
+
+ -- Christopher James Halse Rogers <raof@ubuntu.com>  Tue, 18 Jun 2013 11:56:42 +1000
+
 mesa (9.2~git20130611.761320b1-0ubuntu0+mir1) saucy; urgency=low
 
   * New upstream snapshot
