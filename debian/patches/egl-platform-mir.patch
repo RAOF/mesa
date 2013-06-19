@@ -833,7 +833,7 @@ index 7f15d10..fc5531b 100644
  
  #ifdef NOUVEAU_ENABLE_DRIVER_STATISTICS
 diff --git a/src/gallium/drivers/nv30/nv30_screen.c b/src/gallium/drivers/nv30/nv30_screen.c
-index c9943e0..2e0dabe 100644
+index c9943e0..2e8dbe2 100644
 --- a/src/gallium/drivers/nv30/nv30_screen.c
 +++ b/src/gallium/drivers/nv30/nv30_screen.c
 @@ -31,6 +31,8 @@
@@ -845,14 +845,7 @@ index c9943e0..2e0dabe 100644
  #include "nouveau/nouveau_fence.h"
  #include "nv30_screen.h"
  #include "nv30_context.h"
-@@ -125,12 +127,16 @@ nv30_screen_get_param(struct pipe_screen *pscreen, enum pipe_cap param)
-    case PIPE_CAP_QUERY_PIPELINE_STATISTICS:
-    case PIPE_CAP_TEXTURE_BORDER_COLOR_QUIRK:
-    case PIPE_CAP_MAX_TEXTURE_BUFFER_SIZE:
-+   case PIPE_CAP_PRIME:
-       return 0;
-    case PIPE_CAP_VERTEX_BUFFER_OFFSET_4BYTE_ALIGNED_ONLY:
-    case PIPE_CAP_VERTEX_BUFFER_STRIDE_4BYTE_ALIGNED_ONLY:
+@@ -131,6 +133,9 @@ nv30_screen_get_param(struct pipe_screen *pscreen, enum pipe_cap param)
     case PIPE_CAP_VERTEX_ELEMENT_SRC_OFFSET_4BYTE_ALIGNED_ONLY:
     case PIPE_CAP_PREFER_BLIT_BASED_TEXTURE_TRANSFER:
        return 1;
@@ -909,7 +902,7 @@ index 97ce82c..b7dca8b 100644
        NOUVEAU_ERR("unknown PIPE_CAP %d\n", param);
        return 0;
 diff --git a/src/gallium/drivers/r300/r300_screen.c b/src/gallium/drivers/r300/r300_screen.c
-index e58916b..0bb7d00 100644
+index e58916b..4fc31c5 100644
 --- a/src/gallium/drivers/r300/r300_screen.c
 +++ b/src/gallium/drivers/r300/r300_screen.c
 @@ -28,6 +28,8 @@
@@ -921,15 +914,7 @@ index e58916b..0bb7d00 100644
  #include "r300_context.h"
  #include "r300_texture.h"
  #include "r300_screen_buffer.h"
-@@ -164,6 +166,7 @@ static int r300_get_param(struct pipe_screen* pscreen, enum pipe_cap param)
-         case PIPE_CAP_TEXTURE_BUFFER_OFFSET_ALIGNMENT:
-         case PIPE_CAP_TEXTURE_BORDER_COLOR_QUIRK:
-         case PIPE_CAP_MAX_TEXTURE_BUFFER_SIZE:
-+        case PIPE_CAP_PRIME:
-             return 0;
- 
-         /* SWTCL-only features. */
-@@ -191,6 +194,11 @@ static int r300_get_param(struct pipe_screen* pscreen, enum pipe_cap param)
+@@ -191,6 +193,11 @@ static int r300_get_param(struct pipe_screen* pscreen, enum pipe_cap param)
          /* Render targets. */
          case PIPE_CAP_MAX_RENDER_TARGETS:
              return 4;
@@ -965,7 +950,7 @@ index 71f555b..a17cda0 100644
  	return 0;
  }
 diff --git a/src/gallium/drivers/radeonsi/radeonsi_pipe.c b/src/gallium/drivers/radeonsi/radeonsi_pipe.c
-index 382311f..a3d5b12 100644
+index 382311f..e14549d 100644
 --- a/src/gallium/drivers/radeonsi/radeonsi_pipe.c
 +++ b/src/gallium/drivers/radeonsi/radeonsi_pipe.c
 @@ -20,6 +20,7 @@
@@ -976,15 +961,7 @@ index 382311f..a3d5b12 100644
  #include <stdio.h>
  #include <errno.h>
  #include "pipe/p_defines.h"
-@@ -384,6 +385,7 @@ static int r600_get_param(struct pipe_screen* pscreen, enum pipe_cap param)
- 	case PIPE_CAP_TEXTURE_BUFFER_OFFSET_ALIGNMENT:
- 	case PIPE_CAP_TEXTURE_BORDER_COLOR_QUIRK:
-         case PIPE_CAP_MAX_TEXTURE_BUFFER_SIZE:
-+	case PIPE_CAP_PRIME:
- 		return 0;
- 
- 	/* Stream output. */
-@@ -426,6 +428,9 @@ static int r600_get_param(struct pipe_screen* pscreen, enum pipe_cap param)
+@@ -426,6 +427,9 @@ static int r600_get_param(struct pipe_screen* pscreen, enum pipe_cap param)
  
  	case PIPE_CAP_MAX_TEXEL_OFFSET:
  		return 7;
