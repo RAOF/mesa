@@ -1,3 +1,11 @@
+mesa (9.2~git20130611.761320b1-0ubuntu0+mir4) saucy; urgency=low
+
+  * debian/control: Add mirclient-dev to libegl1-mesa-dev
+    - It's not strictly necessary, but people could reasonably be building
+      against EGL with -DMIR_EGL_PLATFORM.
+
+ -- Christopher James Halse Rogers <raof@ubuntu.com>  Mon, 24 Jun 2013 15:32:02 +1000
+
 mesa (9.2~git20130611.761320b1-0ubuntu0+mir3) saucy; urgency=low
 
   * debian/control: Ahem. 0.4 ≠ 0.0.4!
