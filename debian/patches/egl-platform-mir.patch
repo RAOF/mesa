@@ -879,7 +879,7 @@ index b6da303..88eabd4 100644
        NOUVEAU_ERR("unknown PIPE_CAP %d\n", param);
        return 0;
 diff --git a/src/gallium/drivers/nvc0/nvc0_screen.c b/src/gallium/drivers/nvc0/nvc0_screen.c
-index 97ce82c..b7dca8b 100644
+index 19f11ca..202b45e 100644
 --- a/src/gallium/drivers/nvc0/nvc0_screen.c
 +++ b/src/gallium/drivers/nvc0/nvc0_screen.c
 @@ -24,6 +24,8 @@
@@ -927,7 +927,7 @@ index e58916b..4fc31c5 100644
      return 0;
  }
 diff --git a/src/gallium/drivers/r600/r600_pipe.c b/src/gallium/drivers/r600/r600_pipe.c
-index 71f555b..a17cda0 100644
+index 74a650a..67cfb49 100644
 --- a/src/gallium/drivers/r600/r600_pipe.c
 +++ b/src/gallium/drivers/r600/r600_pipe.c
 @@ -27,6 +27,7 @@
@@ -938,7 +938,7 @@ index 71f555b..a17cda0 100644
  
  #include <errno.h>
  #include "pipe/p_shader_tokens.h"
-@@ -673,6 +674,10 @@ static int r600_get_param(struct pipe_screen* pscreen, enum pipe_cap param)
+@@ -675,6 +676,10 @@ static int r600_get_param(struct pipe_screen* pscreen, enum pipe_cap param)
  
  	case PIPE_CAP_TEXTURE_BORDER_COLOR_QUIRK:
  		return PIPE_QUIRK_TEXTURE_BORDER_COLOR_SWIZZLE_R600;
@@ -950,7 +950,7 @@ index 71f555b..a17cda0 100644
  	return 0;
  }
 diff --git a/src/gallium/drivers/radeonsi/radeonsi_pipe.c b/src/gallium/drivers/radeonsi/radeonsi_pipe.c
-index 382311f..e14549d 100644
+index 3f4cd78..bd14d72 100644
 --- a/src/gallium/drivers/radeonsi/radeonsi_pipe.c
 +++ b/src/gallium/drivers/radeonsi/radeonsi_pipe.c
 @@ -20,6 +20,7 @@
@@ -961,7 +961,7 @@ index 382311f..e14549d 100644
  #include <stdio.h>
  #include <errno.h>
  #include "pipe/p_defines.h"
-@@ -426,6 +427,9 @@ static int r600_get_param(struct pipe_screen* pscreen, enum pipe_cap param)
+@@ -428,6 +429,9 @@ static int r600_get_param(struct pipe_screen* pscreen, enum pipe_cap param)
  
  	case PIPE_CAP_MAX_TEXEL_OFFSET:
  		return 7;
@@ -1038,10 +1038,10 @@ index f9bd222..5b76d87 100644
     unsigned type;
     /**
 diff --git a/src/gallium/state_trackers/dri/drm/dri2.c b/src/gallium/state_trackers/dri/drm/dri2.c
-index 1839b16..63b1de6 100644
+index 1dcc1f7..3bdae9d 100644
 --- a/src/gallium/state_trackers/dri/drm/dri2.c
 +++ b/src/gallium/state_trackers/dri/drm/dri2.c
-@@ -230,7 +230,13 @@ dri2_drawable_process_buffers(struct dri_drawable *drawable,
+@@ -263,7 +263,13 @@ dri2_drawable_process_buffers(struct dri_drawable *drawable,
  
        templ.format = format;
        templ.bind = bind;
@@ -1056,7 +1056,7 @@ index 1839b16..63b1de6 100644
        whandle.stride = buf->pitch;
  
        drawable->textures[statt] =
-@@ -451,14 +457,14 @@ dri2_lookup_egl_image(struct dri_screen *screen, void *handle)
+@@ -533,14 +539,14 @@ dri2_lookup_egl_image(struct dri_screen *screen, void *handle)
  }
  
  static __DRIimage *
@@ -1075,7 +1075,7 @@ index 1839b16..63b1de6 100644
     unsigned tex_usage;
     enum pipe_format pf;
  
-@@ -498,12 +504,10 @@ dri2_create_image_from_name(__DRIscreen *_screen,
+@@ -580,12 +586,10 @@ dri2_create_image_from_name(__DRIscreen *_screen,
     templ.depth0 = 1;
     templ.array_size = 1;
  
@@ -1090,7 +1090,7 @@ index 1839b16..63b1de6 100644
     if (!img->texture) {
        FREE(img);
        return NULL;
-@@ -518,6 +522,39 @@ dri2_create_image_from_name(__DRIscreen *_screen,
+@@ -600,6 +604,39 @@ dri2_create_image_from_name(__DRIscreen *_screen,
  }
  
  static __DRIimage *
@@ -1130,7 +1130,7 @@ index 1839b16..63b1de6 100644
  dri2_create_image_from_renderbuffer(__DRIcontext *context,
  				    int renderbuffer, void *loaderPrivate)
  {
-@@ -609,6 +646,7 @@ dri2_query_image(__DRIimage *image, int attrib, int *value)
+@@ -691,6 +728,7 @@ dri2_query_image(__DRIimage *image, int attrib, int *value)
  
     switch (attrib) {
     case __DRI_IMAGE_ATTRIB_STRIDE:
@@ -1138,7 +1138,7 @@ index 1839b16..63b1de6 100644
        image->texture->screen->resource_get_handle(image->texture->screen,
              image->texture, &whandle);
        *value = whandle.stride;
-@@ -625,6 +663,11 @@ dri2_query_image(__DRIimage *image, int attrib, int *value)
+@@ -707,6 +745,11 @@ dri2_query_image(__DRIimage *image, int attrib, int *value)
           image->texture, &whandle);
        *value = whandle.handle;
        return GL_TRUE;
@@ -1150,7 +1150,7 @@ index 1839b16..63b1de6 100644
     case __DRI_IMAGE_ATTRIB_FORMAT:
        *value = image->dri_format;
        return GL_TRUE;
-@@ -748,6 +791,67 @@ dri2_from_planar(__DRIimage *image, int plane, void *loaderPrivate)
+@@ -830,6 +873,67 @@ dri2_from_planar(__DRIimage *image, int plane, void *loaderPrivate)
     return img;
  }
  
@@ -1218,7 +1218,7 @@ index 1839b16..63b1de6 100644
  static void
  dri2_destroy_image(__DRIimage *img)
  {
-@@ -756,7 +860,7 @@ dri2_destroy_image(__DRIimage *img)
+@@ -838,7 +942,7 @@ dri2_destroy_image(__DRIimage *img)
  }
  
  static struct __DRIimageExtensionRec dri2ImageExtension = {
@@ -1227,7 +1227,7 @@ index 1839b16..63b1de6 100644
      dri2_create_image_from_name,
      dri2_create_image_from_renderbuffer,
      dri2_destroy_image,
-@@ -766,6 +870,8 @@ static struct __DRIimageExtensionRec dri2ImageExtension = {
+@@ -848,6 +952,8 @@ static struct __DRIimageExtensionRec dri2ImageExtension = {
      dri2_validate_usage,
      dri2_from_names,
      dri2_from_planar,
@@ -1236,7 +1236,7 @@ index 1839b16..63b1de6 100644
  };
  
  /*
-@@ -812,6 +918,12 @@ dri2_init_screen(__DRIscreen * sPriv)
+@@ -894,6 +1000,12 @@ dri2_init_screen(__DRIscreen * sPriv)
        screen->default_throttle_frames = throttle_ret->val.val_int;
     }
  
@@ -1680,11 +1680,11 @@ index a3a0530..6701b14 100644
  
     if (usage & GBM_BO_USE_SCANOUT)
        dri_use |= __DRI_IMAGE_USE_SCANOUT;
-diff --git a/src/mesa/drivers/dri/intel/intel_context.c b/src/mesa/drivers/dri/intel/intel_context.c
-index 09b33b1..df7a5c2 100644
---- a/src/mesa/drivers/dri/intel/intel_context.c
-+++ b/src/mesa/drivers/dri/intel/intel_context.c
-@@ -984,34 +984,47 @@ intel_process_dri2_buffer(struct intel_context *intel,
+diff --git a/src/mesa/drivers/dri/i915/intel_context.c b/src/mesa/drivers/dri/i915/intel_context.c
+index 23d8281..dd69d19 100644
+--- a/src/mesa/drivers/dri/i915/intel_context.c
++++ b/src/mesa/drivers/dri/i915/intel_context.c
+@@ -970,34 +970,47 @@ intel_process_dri2_buffer(struct intel_context *intel,
      * use of a mapping of the buffer involves a bunch of page faulting which is
      * moderately expensive.
      */
