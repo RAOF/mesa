@@ -1,3 +1,9 @@
+mesa (9.2~git20130628.g6b676e6-0ubuntu0+mir2) saucy; urgency=low
+
+  * Fix Mir platform on i965
+
+ -- Christopher James Halse Rogers <raof@ubuntu.com>  Fri, 05 Jul 2013 10:19:58 +1000
+
 mesa (9.2~git20130628.g6b676e6-0ubuntu0+mir1) saucy; urgency=low
 
   * Rebase on new upstream to pull in some IvyBridge GPU hang fixes
