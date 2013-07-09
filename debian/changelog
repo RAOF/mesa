@@ -1,3 +1,9 @@
+mesa (9.2~git20130628.g6b676e6-0ubuntu0+mir4) saucy; urgency=low
+
+  * More mir_*_is_valid renaming
+
+ -- Christopher James Halse Rogers <raof@ubuntu.com>  Tue, 09 Jul 2013 12:42:32 +1000
+
 mesa (9.2~git20130628.g6b676e6-0ubuntu0+mir3) saucy; urgency=low
 
   * Fold in Alexandros' dynamic mir_*_is_valid handling
