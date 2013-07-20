@@ -1460,7 +1460,9 @@ for plat in $egl_platforms; do
 
 	android|fbdev|gdi|null)
 		;;
-
+        mir)
+                PKG_CHECK_MODULES([MIR], [mirclient])
+                ;;
 	*)
 		AC_MSG_ERROR([EGL platform '$plat' does not exist])
 		;;
@@ -1489,6 +1491,7 @@ AM_CONDITIONAL(HAVE_EGL_PLATFORM_WAYLAND, echo "$egl_platforms" | grep 'wayland'
 AM_CONDITIONAL(HAVE_EGL_PLATFORM_DRM, echo "$egl_platforms" | grep 'drm' >/dev/null 2>&1)
 AM_CONDITIONAL(HAVE_EGL_PLATFORM_FBDEV, echo "$egl_platforms" | grep 'fbdev' >/dev/null 2>&1)
 AM_CONDITIONAL(HAVE_EGL_PLATFORM_NULL, echo "$egl_platforms" | grep 'null' >/dev/null 2>&1)
+AM_CONDITIONAL(HAVE_EGL_PLATFORM_MIR, echo "$egl_platforms" | grep 'mir' >/dev/null 2>&1)
 
 AM_CONDITIONAL(HAVE_EGL_DRIVER_DRI2, test "x$HAVE_EGL_DRIVER_DRI2" != "x")
 

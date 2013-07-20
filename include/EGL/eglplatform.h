@@ -104,6 +104,13 @@ typedef struct ANativeWindow        *EGLNativeWindowType;
 typedef struct egl_native_pixmap_t  *EGLNativePixmapType;
 typedef void                        *EGLNativeDisplayType;
 
+#elif defined(MIR_EGL_PLATFORM)
+
+#include <mir_toolkit/mir_client_library.h>
+typedef MirEGLNativeDisplayType EGLNativeDisplayType;
+typedef void                   *EGLNativePixmapType;
+typedef MirEGLNativeWindowType  EGLNativeWindowType;
+
 #elif defined(__unix__)
 
 #ifdef MESA_EGL_NO_X11_HEADERS

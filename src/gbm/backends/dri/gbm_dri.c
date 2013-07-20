@@ -329,9 +329,11 @@ gbm_dri_is_format_supported(struct gbm_device *gbm,
    switch (format) {
    case GBM_BO_FORMAT_XRGB8888:
    case GBM_FORMAT_XRGB8888:
+   case GBM_FORMAT_XBGR8888:
       break;
    case GBM_BO_FORMAT_ARGB8888:
    case GBM_FORMAT_ARGB8888:
+   case GBM_FORMAT_ABGR8888:
       if (usage & GBM_BO_USE_SCANOUT)
          return 0;
       break;

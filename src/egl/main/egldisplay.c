@@ -59,6 +59,10 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #endif
+#ifdef HAVE_MIR_PLATFORM
+#include <dlfcn.h>
+#include <mir_toolkit/mesa/native_display.h>
+#endif
 
 /**
  * Map --with-egl-platforms names to platform types.
@@ -73,7 +77,8 @@ static const struct {
    { _EGL_PLATFORM_DRM, "drm" },
    { _EGL_PLATFORM_FBDEV, "fbdev" },
    { _EGL_PLATFORM_NULL, "null" },
-   { _EGL_PLATFORM_ANDROID, "android" }
+   { _EGL_PLATFORM_ANDROID, "android" },
+   { _EGL_PLATFORM_MIR, "mir" },
 };
 
 
@@ -133,6 +138,47 @@ _eglPointerIsDereferencable(void *p)
 #endif
 }
 
+#ifdef HAVE_MIR_PLATFORM
+static EGLBoolean
+_mir_display_is_valid(EGLNativeDisplayType nativeDisplay)
+{
+   typedef int (*MirEGLNativeDisplayIsValidFunc)(MirMesaEGLNativeDisplay*);
+
+   void *lib;
+   MirEGLNativeDisplayIsValidFunc general_check;
+   MirEGLNativeDisplayIsValidFunc client_check;
+   MirEGLNativeDisplayIsValidFunc server_check;
+   EGLBoolean is_valid = EGL_FALSE;
+
+   lib = dlopen(NULL, RTLD_LAZY);
+   if (lib == NULL)
+      return EGL_FALSE;
+
+   general_check = (MirEGLNativeDisplayIsValidFunc) dlsym(lib, "mir_egl_mesa_display_is_valid");
+   client_check = (MirEGLNativeDisplayIsValidFunc) dlsym(lib, "mir_client_mesa_egl_native_display_is_valid");
+   server_check = (MirEGLNativeDisplayIsValidFunc) dlsym(lib, "mir_server_mesa_egl_native_display_is_valid");
+
+   if (general_check != NULL &&
+       general_check((MirMesaEGLNativeDisplay *)nativeDisplay))
+   {
+      is_valid = EGL_TRUE;
+   }
+   else if (client_check != NULL &&
+            client_check((MirMesaEGLNativeDisplay *)nativeDisplay))
+   {
+      is_valid = EGL_TRUE;
+   }
+   else if (server_check != NULL &&
+            server_check((MirMesaEGLNativeDisplay *)nativeDisplay))
+   {
+      is_valid = EGL_TRUE;
+   }
+
+   dlclose(lib);
+
+   return is_valid;
+}
+#endif
 
 /**
  * Try detecting native platform with the help of native display characteristcs.
@@ -151,6 +197,11 @@ _eglNativePlatformDetectNativeDisplay(EGLNativeDisplayType nativeDisplay)
    /* fbdev is the only platform that can be a file descriptor. */
    if (fstat((intptr_t) nativeDisplay, &buf) == 0 && S_ISCHR(buf.st_mode))
       return _EGL_PLATFORM_FBDEV;
+#endif
+
+#ifdef HAVE_MIR_PLATFORM
+   if (_mir_display_is_valid(nativeDisplay))
+      return _EGL_PLATFORM_MIR;
 #endif
 
    if (_eglPointerIsDereferencable(nativeDisplay)) {
