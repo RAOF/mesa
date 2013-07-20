@@ -407,6 +407,41 @@ gbm_dri_to_gbm_format(uint32_t dri_format)
    return ret;
 }
 
+static uint32_t
+gbm_to_dri_format(uint32_t gbm_format)
+{
+   uint32_t dri_format = 0;
+
+   switch (gbm_format) {
+   case GBM_FORMAT_RGB565:
+      dri_format =__DRI_IMAGE_FORMAT_RGB565;
+      break;
+   case GBM_FORMAT_XRGB8888:
+   case GBM_BO_FORMAT_XRGB8888:
+      dri_format = __DRI_IMAGE_FORMAT_XRGB8888;
+      break;
+   case GBM_FORMAT_ARGB8888:
+   case GBM_BO_FORMAT_ARGB8888:
+      dri_format = __DRI_IMAGE_FORMAT_ARGB8888;
+      break;
+   case GBM_FORMAT_ABGR8888:
+      dri_format = __DRI_IMAGE_FORMAT_ABGR8888;
+      break;
+   case GBM_FORMAT_ARGB2101010:
+      dri_format = __DRI_IMAGE_FORMAT_ARGB2101010;
+      break;
+   case GBM_FORMAT_XRGB2101010:
+      dri_format = __DRI_IMAGE_FORMAT_XRGB2101010;
+   case GBM_FORMAT_XBGR8888:
+      dri_format = __DRI_IMAGE_FORMAT_XBGR8888;
+      break;
+   default:
+      dri_format = __DRI_IMAGE_FORMAT_NONE;
+   }
+
+   return dri_format;
+}
+
 static struct gbm_bo *
 gbm_dri_bo_import(struct gbm_device *gbm,
                   uint32_t type, void *buffer, uint32_t usage)
@@ -590,32 +625,7 @@ gbm_dri_bo_create(struct gbm_device *gbm,
    bo->base.base.height = height;
    bo->base.base.format = format;
 
-   switch (format) {
-   case GBM_FORMAT_RGB565:
-      dri_format =__DRI_IMAGE_FORMAT_RGB565;
-      break;
-   case GBM_FORMAT_XRGB8888:
-   case GBM_BO_FORMAT_XRGB8888:
-      dri_format = __DRI_IMAGE_FORMAT_XRGB8888;
-      break;
-   case GBM_FORMAT_ARGB8888:
-   case GBM_BO_FORMAT_ARGB8888:
-      dri_format = __DRI_IMAGE_FORMAT_ARGB8888;
-      break;
-   case GBM_FORMAT_ABGR8888:
-      dri_format = __DRI_IMAGE_FORMAT_ABGR8888;
-      break;
-   case GBM_FORMAT_ARGB2101010:
-      dri_format = __DRI_IMAGE_FORMAT_ARGB2101010;
-      break;
-   case GBM_FORMAT_XRGB2101010:
-      dri_format = __DRI_IMAGE_FORMAT_XRGB2101010;
-   case GBM_FORMAT_XBGR8888:
-      dri_format = __DRI_IMAGE_FORMAT_XBGR8888;
-      break;
-   default:
-      return NULL;
-   }
+   dri_format = gbm_to_dri_format(format);
 
    if (usage & GBM_BO_USE_SCANOUT)
       dri_use |= __DRI_IMAGE_USE_SCANOUT;
