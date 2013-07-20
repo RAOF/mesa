@@ -57,7 +57,7 @@ typedef struct _egl_module {
    char *Path;
    _EGLMain_t BuiltIn;
    void *Handle;
-   _EGLDriver *Driver;
+   _EGLDriver *Driver[_EGL_NUM_PLATFORMS];
 } _EGLModule;
 
 static _EGLMutex _eglModuleMutex = _EGL_MUTEX_INITIALIZER;
@@ -131,7 +131,6 @@ library_suffix(void)
 
 #endif
 
-
 /**
  * Open the named driver and find its bootstrap function: _eglMain().
  */
@@ -144,8 +143,12 @@ _eglOpenLibrary(const char *driverPath, lib_handle *handle)
 
    assert(driverPath);
 
-   _eglLog(_EGL_DEBUG, "dlopen(%s)", driverPath);
-   lib = open_library(driverPath);
+   if (*handle) {
+      lib = *handle;
+   } else {
+      _eglLog(_EGL_DEBUG, "dlopen(%s)", driverPath);
+      lib = open_library(driverPath);
+   }
 
 #if defined(_EGL_OS_WINDOWS)
    /* XXX untested */
@@ -191,13 +194,13 @@ _eglOpenLibrary(const char *driverPath, lib_handle *handle)
  * Load a module and create the driver object.
  */
 static EGLBoolean
-_eglLoadModule(_EGLModule *mod)
+_eglLoadModule(_EGLModule *mod, _EGLPlatformType plat)
 {
    _EGLMain_t mainFunc;
-   lib_handle lib;
+   lib_handle lib = (lib_handle) mod->Handle;
    _EGLDriver *drv;
 
-   if (mod->Driver)
+   if (mod->Driver[plat])
       return EGL_TRUE;
 
    if (mod->BuiltIn) {
@@ -223,7 +226,7 @@ _eglLoadModule(_EGLModule *mod)
    }
 
    mod->Handle = (void *) lib;
-   mod->Driver = drv;
+   mod->Driver[plat] = drv;
 
    return EGL_TRUE;
 }
@@ -237,8 +240,10 @@ _eglUnloadModule(_EGLModule *mod)
 {
 #if defined(_EGL_OS_UNIX)
    /* destroy the driver */
-   if (mod->Driver && mod->Driver->Unload)
-      mod->Driver->Unload(mod->Driver);
+   for (int plat = 0; plat < _EGL_NUM_PLATFORMS; ++plat) {
+      if (mod->Driver[plat] && mod->Driver[plat]->Unload)
+         mod->Driver[plat]->Unload(mod->Driver[plat]);
+   }
 
    /*
     * XXX At this point (atexit), the module might be the last reference to
@@ -252,7 +257,9 @@ _eglUnloadModule(_EGLModule *mod)
    /* XXX Windows unloads DLLs before atexit */
 #endif
 
-   mod->Driver = NULL;
+   for (int plat = 0; plat < _EGL_NUM_PLATFORMS; ++plat) {
+      mod->Driver[plat] = NULL;
+   }
    mod->Handle = NULL;
 }
 
@@ -596,17 +603,17 @@ _eglMatchAndInitialize(_EGLDisplay *dpy)
    while (i < _eglModules->Size) {
       _EGLModule *mod = (_EGLModule *) _eglModules->Elements[i];
 
-      if (!_eglLoadModule(mod)) {
+      if (!_eglLoadModule(mod, dpy->Platform)) {
          /* remove invalid modules */
          _eglEraseArray(_eglModules, i, _eglFreeModule);
          continue;
       }
 
-      if (mod->Driver->API.Initialize(mod->Driver, dpy)) {
-         drv = mod->Driver;
+      drv = mod->Driver[dpy->Platform];
+      if (drv->API.Initialize(drv, dpy))
          break;
-      }
       else {
+         drv = NULL;
          i++;
       }
    }
@@ -658,7 +665,6 @@ __eglMustCastToProperFunctionPointerType
 _eglGetDriverProc(const char *procname)
 {
    EGLint i;
-   _EGLProc proc = NULL;
 
    if (!_eglModules) {
       /* load the driver for the default display */
@@ -670,15 +676,18 @@ _eglGetDriverProc(const char *procname)
 
    for (i = 0; i < _eglModules->Size; i++) {
       _EGLModule *mod = (_EGLModule *) _eglModules->Elements[i];
+      _EGLProc proc;
 
-      if (!mod->Driver)
-         break;
-      proc = mod->Driver->API.GetProcAddress(mod->Driver, procname);
-      if (proc)
-         break;
+      for (_EGLPlatformType plat = 0; plat < _EGL_NUM_PLATFORMS; ++plat) {
+         if (!mod->Driver[plat])
+            continue;
+         proc = mod->Driver[plat]->API.GetProcAddress(mod->Driver[plat], procname);
+         if (proc)
+            return proc;
+      }
    }
 
-   return proc;
+   return NULL;
 }
 
 

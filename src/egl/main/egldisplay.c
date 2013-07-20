@@ -60,7 +60,6 @@
 #include <sys/stat.h>
 #endif
 
-
 /**
  * Map --with-egl-platforms names to platform types.
  */
@@ -188,7 +187,7 @@ _eglNativePlatformDetectNativeDisplay(EGLNativeDisplayType nativeDisplay)
 _EGLPlatformType
 _eglGetNativePlatform(EGLNativeDisplayType nativeDisplay)
 {
-   static _EGLPlatformType native_platform = _EGL_INVALID_PLATFORM;
+   _EGLPlatformType native_platform = _EGL_INVALID_PLATFORM;
    char *detection_method = NULL;
 
    if (native_platform == _EGL_INVALID_PLATFORM) {
