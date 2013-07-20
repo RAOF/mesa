@@ -396,6 +396,9 @@ gbm_dri_to_gbm_format(uint32_t dri_format)
    case __DRI_IMAGE_FORMAT_ABGR8888:
       ret = GBM_FORMAT_ABGR8888;
       break;
+   case __DRI_IMAGE_FORMAT_XBGR8888:
+      ret = GBM_FORMAT_XBGR8888;
+      break;
    default:
       ret = 0;
       break;
@@ -607,6 +610,8 @@ gbm_dri_bo_create(struct gbm_device *gbm,
       break;
    case GBM_FORMAT_XRGB2101010:
       dri_format = __DRI_IMAGE_FORMAT_XRGB2101010;
+   case GBM_FORMAT_XBGR8888:
+      dri_format = __DRI_IMAGE_FORMAT_XBGR8888;
       break;
    default:
       return NULL;
