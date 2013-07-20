@@ -1267,13 +1267,15 @@ intel_process_dri2_buffer(struct brw_context *brw,
    if (num_samples == 0) {
        if (rb->mt &&
            rb->mt->region &&
-           rb->mt->region->name == buffer->name)
+           rb->mt->region->name == buffer->name &&
+           rb->mt->region->name != 0)
           return;
    } else {
        if (rb->mt &&
            rb->mt->singlesample_mt &&
            rb->mt->singlesample_mt->region &&
-           rb->mt->singlesample_mt->region->name == buffer->name)
+           rb->mt->singlesample_mt->region->name == buffer->name &&
+           rb->mt->singlesample_mt->region->name != 0)
           return;
    }
 
@@ -1285,13 +1287,24 @@ intel_process_dri2_buffer(struct brw_context *brw,
    }
 
    intel_miptree_release(&rb->mt);
-   region = intel_region_alloc_for_handle(brw->intelScreen,
-                                          buffer->cpp,
-                                          drawable->w,
-                                          drawable->h,
-                                          buffer->pitch,
-                                          buffer->name,
-                                          buffer_name);
+   if (buffer->name != 0) {
+      region = intel_region_alloc_for_handle(brw->intelScreen,
+                                             buffer->cpp,
+                                             drawable->w,
+                                             drawable->h,
+                                             buffer->pitch,
+                                             buffer->name,
+                                             buffer_name);
+   } else {
+      region = intel_region_alloc_for_fd(brw->intelScreen,
+                                         buffer->cpp,
+                                         drawable->w,
+                                         drawable->h,
+                                         buffer->pitch,
+                                         0, /* Can we be so stupid? */
+                                         buffer->fd,
+                                         buffer_name);
+   }
    if (!region) {
       fprintf(stderr,
               "Failed to make region for returned DRI2 buffer "
