@@ -233,7 +233,6 @@ dri2_destroy_mir_surface(_EGLDriver *drv, _EGLDisplay *disp, _EGLSurface *surf)
       }
    }
 
-   free(dri2_surf);
    free(surf);
 
    return EGL_TRUE;
