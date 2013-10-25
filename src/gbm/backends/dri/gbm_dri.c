@@ -133,7 +133,7 @@ static const __DRIimageLookupExtension image_lookup_extension = {
 };
 
 static const __DRIdri2LoaderExtension dri2_loader_extension = {
-   { __DRI_DRI2_LOADER, 3 },
+   { __DRI_DRI2_LOADER, 4 },
    dri_get_buffers,
    dri_flush_front_buffer,
    dri_get_buffers_with_format,
