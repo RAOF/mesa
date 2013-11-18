@@ -145,6 +145,12 @@ mir_advance_colour_buffer(struct dri2_egl_surface *surf)
    assert(buffer_package.data_items == 0);
    assert(buffer_package.fd_items == 1);
 
+   /* Mir ABIs prior to release 0.1.2 lacked width and height */
+   if (buffer_package.width && buffer_package.height) {
+      surf->base.Width = buffer_package.width;
+      surf->base.Height = buffer_package.height;
+   }
+
    surf->dri_buffers[__DRI_BUFFER_BACK_LEFT]->name = 0;
    surf->dri_buffers[__DRI_BUFFER_BACK_LEFT]->fd = buffer_package.fd[0];
    surf->dri_buffers[__DRI_BUFFER_BACK_LEFT]->pitch = buffer_package.stride;
