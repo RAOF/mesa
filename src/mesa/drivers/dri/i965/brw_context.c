@@ -1020,7 +1020,7 @@ intel_process_dri2_buffer(struct brw_context *brw,
                           struct intel_renderbuffer *rb,
                           const char *buffer_name);
 
-static void
+static int
 intel_update_image_buffers(struct brw_context *brw, __DRIdrawable *drawable);
 
 static void
@@ -1093,9 +1093,7 @@ intel_update_renderbuffers(__DRIcontext *context, __DRIdrawable *drawable)
    if (unlikely(INTEL_DEBUG & DEBUG_DRI))
       fprintf(stderr, "enter %s, drawable %p\n", __func__, drawable);
 
-   if (screen->image.loader)
-      intel_update_image_buffers(brw, drawable);
-   else
+   if (!screen->image.loader || !intel_update_image_buffers(brw, drawable))
       intel_update_dri2_buffers(brw, drawable);
 
    driUpdateFramebufferSize(&brw->ctx, drawable);
@@ -1380,7 +1378,7 @@ intel_update_image_buffer(struct brw_context *intel,
                                                   region);
 }
 
-static void
+static int
 intel_update_image_buffers(struct brw_context *brw, __DRIdrawable *drawable)
 {
    struct gl_framebuffer *fb = drawable->driverPrivate;
@@ -1399,7 +1397,7 @@ intel_update_image_buffers(struct brw_context *brw, __DRIdrawable *drawable)
    else if (front_rb)
       format = intel_rb_format(front_rb);
    else
-      return;
+      return 0;
 
    if ((brw->is_front_buffer_rendering || brw->is_front_buffer_reading || !back_rb) && front_rb)
       buffer_mask |= __DRI_IMAGE_BUFFER_FRONT;
@@ -1407,12 +1405,13 @@ intel_update_image_buffers(struct brw_context *brw, __DRIdrawable *drawable)
    if (back_rb)
       buffer_mask |= __DRI_IMAGE_BUFFER_BACK;
 
-   (*screen->image.loader->getBuffers) (drawable,
-                                        driGLFormatToImageFormat(format),
-                                        &drawable->dri2.stamp,
-                                        drawable->loaderPrivate,
-                                        buffer_mask,
-                                        &images);
+   if (!(*screen->image.loader->getBuffers) (drawable,
+                                             driGLFormatToImageFormat(format),
+                                             &drawable->dri2.stamp,
+                                             drawable->loaderPrivate,
+                                             buffer_mask,
+                                             &images))
+      return 0;
 
    if (images.image_mask & __DRI_IMAGE_BUFFER_FRONT) {
       drawable->w = images.front->width;
@@ -1432,4 +1431,5 @@ intel_update_image_buffers(struct brw_context *brw, __DRIdrawable *drawable)
                                 images.back,
                                 __DRI_IMAGE_BUFFER_BACK);
    }
+   return 1;
 }
